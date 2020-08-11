@@ -1,4 +1,4 @@
-# TmxTool
+# tmxutil
 tmxutil.py allows you to add domain groups to your Europat tmx files, or filter on them.
 
 ## Installation & Requirements
