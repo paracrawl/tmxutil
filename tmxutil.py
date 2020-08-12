@@ -272,19 +272,23 @@ class IPCGroupLabeler(object):
 	def load(self, fh):
 		for line in fh:
 			prefix, group, *_ = line.split('\t', 2)
-			self.patterns.append((prefix.strip(), group.strip(), label.strip()))
+			self.patterns.append((
+				prefix.strip(),
+				{prefix.strip(), group.strip()} if prefix.strip() != "" else {group.strip()}
+			))
 
 		# Sort with most specific on top
-		self.patterns.sort(key=lambda pattern: (-len(prefix), prefix))
+		self.patterns.sort(key=lambda pattern: (-len(pattern[0]), pattern[0]))
 
 	def find_group(self, ipc_code: str) -> Optional[str]:
-		for prefix, group, label in self.patterns:
+		for prefix, groups in self.patterns:
 			if ipc_code.startswith(prefix):
-				return prefix, group, label
+				return groups
+		return set()
 
 	def annotate(self, unit: dict) -> dict:
 		for lang, translation in unit['translations'].items():
-			translation['ipc-group'] = set().union(*(set(group) for group in map(self.find_group, translation['ipc']) if group is not None))
+			translation['ipc-group'] = set().union(*map(self.find_group, translation['ipc']))
 		return unit
 
 
