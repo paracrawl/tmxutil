@@ -6,6 +6,8 @@ To install tmxutil.py, just download it from [Github](https://github.com/paracra
 
 ## Examples
 
+Example tmx file: [DE-EN-2001-Abstract.tmx.gz](https://github.com/paracrawl/tmxutil/files/5062356/DE-EN-2001-Abstract.tmx.gz), ipc domain group file: [ipc-groups.tab](https://github.com/paracrawl/tmxutil/raw/master/ipc-groups.tab)
+
 **Filtering by IPC code**: Filter out only sentence pairs that come from patents with a certain IPC codes.
 
 ```
