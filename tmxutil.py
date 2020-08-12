@@ -271,7 +271,7 @@ class IPCGroupLabeler(object):
 
 	def load(self, fh):
 		for line in fh:
-			prefix, group, label = line.split('\t', 2)
+			prefix, group, *_ = line.split('\t', 2)
 			self.patterns.append((prefix.strip(), group.strip(), label.strip()))
 
 		# Sort with most specific on top
