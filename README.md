@@ -8,6 +8,16 @@ To install tmxutil.py, just download it from [Github](https://github.com/paracra
 
 Example tmx file: [DE-EN-2001-Abstract.tmx.gz](https://github.com/paracrawl/tmxutil/files/5062356/DE-EN-2001-Abstract.tmx.gz), ipc domain group file: [ipc-groups.tab](https://github.com/paracrawl/tmxutil/raw/master/ipc-groups.tab)
 
+The provided IPC grouping has the following high-level categories:
+
+| Group | Description |
+|---|---|
+| I | General / Default |
+| II | Computing, Science and Tech (Science, photography, optics, cryptography, communications)	|
+| III | Biotechnology and Chemical (food, biotech, nanotech, chemistry) |
+| IV | Engineering and Manufacturing (Engines, nuclear physica, agriculture, forestry, aviation) |
+| V | Daily life (Household, music, arts, clothing, jewlery, sports and decorating) |
+
 **Filtering by IPC code**: Filter out only sentence pairs that come from patents with a certain IPC codes.
 
 ```
