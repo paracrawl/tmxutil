@@ -60,6 +60,9 @@ class XMLWriter(object):
 
 # unit = {
 # 	'score-aligner': float,
+#   'score-bifixer': float,
+#   'score-bicleaner': float,
+#   'hash-bifixer': str,
 # 	'translations': {
 # 		str: {
 # 			'source-document': {str},
@@ -192,32 +195,49 @@ class TMXWriter(Writer):
 
 
 class TabReader(Reader):
-	def __init__(self, fh, src_lang, trg_lang):
+	def __init__(self, fh, src_lang, trg_lang, columns=['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']):
 		self.fh = fh
 		self.src_lang = src_lang
 		self.trg_lang = trg_lang
+		self.columns = columns
 
 	def records(self) -> Iterator[dict]:
 		for n, line in enumerate(self.fh):
-			src_url, trg_url, src_text, trg_text, score = line.split('\t')
+			values = line.split('\t')
+
+			record = {
+				'id': n
+			}
+
+			translation1 = {
+				'lang': self.src_lang
+			}
+
+			translation2 = {
+				'lang': self.trg_lang
+			}
+
+			for column, value in zip(self.columns, values):
+				if column == '-':
+					continue
+
+				if column.endswith('-1') or column.endswith('-2'):
+					unit = translation1 if column.endswith('-1') else translation2
+					unit[column[:-2]] = value if column[:-2] in {'text', 'lang'} else {value}
+				else:
+					record[column] = value
+
 			yield {
-				'id': n,
-				'score-aligner': float(score),
+				**record,
 				'translations': {
-					self.src_lang: {
-						'source-document': {src_url},
-						'text': src_text
-					},
-					self.trg_lang: {
-						'source-document': {trg_url},
-						'text': trg_text
-					}
+					translation1['lang']: translation1,
+					translation2['lang']: translation2
 				}
 			}
 
 
 class TabWriter(Writer):
-	def __init__(self, fh, languages = []):
+	def __init__(self, fh, languages=[]):
 		self.fh = fh
 		self.languages = languages
 
