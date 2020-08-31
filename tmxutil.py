@@ -355,14 +355,49 @@ def pred_negate(pred: Callable[[dict], bool]) -> Callable[[dict], bool]:
 	return lambda unit: not pred(unit)
 
 
-def autodetect(fh) -> Optional[str]:
+def peek_first_line(fh, length=128) -> bytes:
+	"""Tries to get the first full line in a buffer that supports peek"""
+	while True:
+		buf = fh.peek(length)
+
+		pos = buf.find(b'\n')
+		if pos != -1:
+			return buf[0:pos]
+
+		if len(buf) < len(length):
+			return buf
+
+		buf *= 2
+
+
+def autodetect(args, fh) -> Optional[str]:
+	"""Fill in arguments based on what we can infer from the input we're going to get."""
+
+	# First test: is it XML?
 	xml_signature = b'<?xml '
-	if fh.peek(len(xml_signature)).startswith(xml_signature):
-		return 'tmx'
-	elif b'\t' in fh.peek(64):
-		return 'tab'
+	if fh.buffer.peek(len(xml_signature)).startswith(xml_signature):
+		args.input_format = 'xml'
+		return
+	
+	# Second test: Might it be tab-separated content? And if so, how many columns?
+	column_count = peek_first_line(fh.buffer).count(b'\t')
+	if column_count >= 7:
+		args.input_format = 'tab'
+		args.input_columns = ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'hash-bifixer', 'score-bifixer', 'score-bicleaner']
+		return
+
+	if column_count >= 5:
+		args.input_format == 'tab'
+		args.input_columns =['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']
+		return
+
 	else:
 		return None
+
+
+def abort(message):
+	print(message, file=sys.stderr)
+	sys.exit(1)
 
 
 if __name__ == '__main__':
@@ -372,6 +407,7 @@ if __name__ == '__main__':
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'])
 	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt'], required=True)
 	parser.add_argument('-l', '--input-languages', nargs=2)
+	parser.add_argument('-c', '--input-columns', nargs='+')
 	parser.add_argument('--output-languages', nargs='+')
 	parser.add_argument('-d', '--deduplicate', action='store_true')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append')
@@ -393,25 +429,28 @@ if __name__ == '__main__':
 
 	# Autodetect input format if we're lazy
 	if not args.input_format:
-		args.input_format = autodetect(fin.buffer)
+		autodetect(args, fin)
 
 	# Parameter validation, early warning system
+	if not args.input_format:
+		abort("Use --input-format to specify the input format")
+
 	if args.input_format == 'tab' and not args.input_languages:
-		print("Tab format requires a --input-languages X Y option.", file=sys.stderr)
-		sys.exit(1)
+		abort("Tab input format requires a --input-languages LANG1 LANG2 option.")
+
+	if args.input_format == 'tab' and not args.input_columns:
+		abort("Tab input format requires a --input-columns option.")
 
 	if args.output_languages == 'txt' and (not args.output_languages or len(args.output_languages) != 1):
-		print("Use --output-languages X to select which language. When writing txt, it can only write one language at a time.", file=sys.stderr)
-		sys.exit(1)
+		abort("Use --output-languages X to select which language. When writing txt, it can only write one language at a time.")
 
 	# Create reader
 	if args.input_format == 'tmx':
 		reader = TMXReader(fin)
 	elif args.input_format == 'tab':
-		reader = TabReader(fin, *args.input_languages)
-	elif not args.input_format:
-		print("Use --input-format tab or tmx to specify input format.", file=sys.stderr)
-		sys.exit(1)
+		reader = TabReader(fin, *args.input_languages, columns=args.input_columns)
+	else:
+		raise RuntimeError("Could not create input reader")
 
 	# Create writer
 	if args.output_format == 'tmx':
