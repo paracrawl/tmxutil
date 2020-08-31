@@ -332,7 +332,6 @@ def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Cal
 		unit_id = key(unit)
 
 		if unit_id in best:
-			print(f"Hit for {unit_id}", file=sys.stderr)
 			best[unit_id] = deduplicate_merge(best[unit_id], unit, compare)
 		else:
 			best[unit_id] = unit
