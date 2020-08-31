@@ -17,6 +17,7 @@ from itertools import combinations
 from collections import defaultdict
 from pprint import pprint
 from typing import Callable, List, Optional, Any, Iterator, Set
+from operator import itemgetter
 
 class XMLWriter(object):
 	def __init__(self, fh):
@@ -316,26 +317,42 @@ def text_key(unit: dict) -> tuple:
 	return tuple(translation['text'] for translation in unit['translations'].values())
 
 
-def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any]) -> Iterator[dict]:
-	prev=None
-	for unit in sorted(reader, key=key):
-		if prev is None:
-			prev = unit
-		elif key(prev) == key(unit):
-			for lang, translation in unit['translations'].items():
-				for t_key, t_value in translation.items():
-					if isinstance(t_value, set):
-						prev['translations'][lang][t_key] |= t_value
-					elif isinstance(t_value, list):
-						prev['translations'][lang][t_key] += t_value
-					else:
-						pass # text, etc.
-		else:
-			yield prev
-			prev = unit
+def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Callable[[dict, dict], bool] = lambda _: False) -> Iterator[dict]:
+	best = dict()
 
-	if prev:
-		yield prev
+	for unit in reader:
+		unit_id = key(unit)
+
+		if unit_id in best:
+			print(f"Hit for {unit_id}", file=sys.stderr)
+			best[unit_id] = deduplicate_merge(best[unit_id], unit, compare)
+		else:
+			best[unit_id] = unit
+	
+	yield from best.values()
+
+
+def deduplicate_merge(best_unit: dict, new_unit: dict, compare: Callable[[dict, dict], bool]) -> dict:
+	"""Merges new_unit into best_unit, combining collections but overwriting
+	all other entries if and only if compare(current, new) is true"""
+	new_is_better = compare(best_unit, new_unit)
+
+	if new_is_better:
+		for key, value in new_unit.items():
+			if key != 'translations':
+				best_unit[key] = value
+
+	for lang, translation in new_unit['translations'].items():
+		for t_key, t_value in translation.items():
+			if isinstance(t_value, set):
+				best_unit['translations'][lang][t_key] |= t_value
+			elif isinstance(t_value, list):
+				best_unit['translations'][lang][t_key] += t_value
+			elif new_is_better: # Text etc, where we need to pick the best instead
+			                    # of keep everything but only if it is better
+				best_unit['translations'][lang][t_key] = t_value
+
+	return best_unit
 
 
 def pred_prop_intersection(key: str, values: Set[str]) -> Callable[[dict], bool]:
@@ -391,8 +408,18 @@ def autodetect(args, fh) -> Optional[str]:
 		args.input_columns =['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']
 		return
 
+
+def autodetect_deduplicator(args, reader):
+	"""
+	Make a deduplicate filter based on the input options. Fancy bifixer based
+	deduplicator if we have the data, otherwise fall back to boring deduplicator.
+	"""
+	if args.input_format == 'tab' and 'hash-bifixer' in args.input_columns and 'score-bifixer' in args.input_columns:
+		return deduplicate(reader,
+			key=itemgetter('hash-bifixer'),
+			compare=lambda best, new: best['score-bifixer'] < new['score-bifixer'])
 	else:
-		return None
+		return deduplicate(reader, key=text_key)
 
 
 def abort(message):
@@ -468,7 +495,7 @@ if __name__ == '__main__':
 		reader = map(IPCGroupLabeler(args.ipc_group_files).annotate, reader)
 
 	if args.deduplicate:
-		reader = deduplicate(reader, key=text_key)
+		reader = autodetect_deduplicator(args, reader)
 
 	if args.with_ipc:
 		reader = filter(pred_translation_prop_intersection('ipc', set(args.with_ipc)), reader)
