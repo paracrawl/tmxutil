@@ -263,6 +263,14 @@ class TxtWriter(Writer):
 		print(unit['translations'][self.language]['text'], file=self.fh)
 
 
+class PyWriter(Writer):
+	def __init__(self, fh):
+		self.fh = fh
+
+	def write(self, unit:dict):
+		pprint(unit, stream=self.fh)
+
+
 class IPCLabeler(object):
 	def __init__(self, paths: List[str] = []):
 		self.lut = dict()
@@ -432,7 +440,7 @@ if __name__ == '__main__':
 
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'])
-	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt'], required=True)
+	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], required=True)
 	parser.add_argument('-l', '--input-languages', nargs=2)
 	parser.add_argument('-c', '--input-columns', nargs='+')
 	parser.add_argument('--output-languages', nargs='+')
@@ -486,6 +494,8 @@ if __name__ == '__main__':
 		writer = TabWriter(fout, args.output_languages)
 	elif args.output_format == 'txt':
 		writer = TxtWriter(fout, args.output_languages[0])
+	elif args.output_format == 'py':
+		writer = PyWriter(fout)
 
 	# Optional filter & annotation steps for reader
 	if args.ipc_meta_files:
