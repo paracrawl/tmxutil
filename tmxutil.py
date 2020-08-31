@@ -329,7 +329,7 @@ def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Cal
 	best = dict()
 
 	for unit in reader:
-		unit_id = key(unit)
+		unit_id = hash(key(unit))
 
 		if unit_id in best:
 			best[unit_id] = deduplicate_merge(best[unit_id], unit, compare)
