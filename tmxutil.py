@@ -20,6 +20,9 @@ from typing import Callable, List, Optional, Any, Iterator, Set
 from operator import itemgetter
 
 class XMLWriter(object):
+	"""Writes XML. Light wrapper around iobase.write really, but handles
+	properly indenting and closing xml elements at the right time."""
+
 	def __init__(self, fh):
 		self.fh = fh
 		self.stack = []
@@ -75,6 +78,8 @@ class XMLWriter(object):
 # }
 
 class Reader(ABC):
+	"""Interface for sentence pair input stream."""
+
 	def __iter__(self) -> Iterator[dict]:
 		return self.records()
 
@@ -84,6 +89,10 @@ class Reader(ABC):
 
 
 class Writer(ABC):
+	"""Interface for sentence pair output stream. Has with statement context
+	magic functions that can be overwritten to deal with writing headers and
+	footers, or starting and ending XML output."""
+
 	def __enter__(self):
 		return self
 
@@ -96,6 +105,11 @@ class Writer(ABC):
 
 
 class TMXReader(Reader):
+	"""TMX File format reader. XML attributes are mostly ignored. <prop/>
+	elements of the <tu/> are added as attributes, and of <tuv/> as attributes
+	with sets of values as we expect one or more of them, i.e. one or more
+	source-document, ipc, etc."""
+
 	def __init__(self, fh):
 		self.fh = fh
 
@@ -272,6 +286,9 @@ class PyWriter(Writer):
 
 
 class IPCLabeler(object):
+	"""Add IPC labels to sentence pairs based on the patent ids found in the
+	source-document property of either side of the pair."""
+
 	def __init__(self, paths: List[str] = []):
 		self.lut = dict()
 		for path in paths:
@@ -292,6 +309,8 @@ class IPCLabeler(object):
 
 
 class IPCGroupLabeler(object):
+	"""Add overall IPC group ids based on IPC labels added by IPCLabeler."""
+
 	def __init__(self, paths: List[str] = []):
 		self.patterns = []
 		for path in paths:
@@ -326,6 +345,16 @@ def text_key(unit: dict) -> tuple:
 
 
 def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Callable[[dict, dict], bool] = lambda _: False) -> Iterator[dict]:
+	"""
+	Deduplicate records read from reader. It does this by creating a hash table
+	of all records, grouped by key(record). If multiple records have the same
+	key they are combined if properties allow this (i.e. sets, lists) or
+	overwritten in case compare(current, new) is True. See deduplicate_merge().
+	
+	Note: This function behaves like an iterator but will only start yielding
+	results once reader has run out of records.
+	"""
+
 	best = dict()
 
 	for unit in reader:
@@ -380,7 +409,7 @@ def pred_negate(pred: Callable[[dict], bool]) -> Callable[[dict], bool]:
 
 
 def peek_first_line(fh, length=128) -> bytes:
-	"""Tries to get the first full line in a buffer that supports peek"""
+	"""Tries to get the first full line in a buffer that supports peek."""
 	while True:
 		buf = fh.peek(length)
 
@@ -395,7 +424,8 @@ def peek_first_line(fh, length=128) -> bytes:
 
 
 def autodetect(args, fh) -> Optional[str]:
-	"""Fill in arguments based on what we can infer from the input we're going to get."""
+	"""Fill in arguments based on what we can infer from the input we're going
+	to get."""
 
 	# First test: is it XML?
 	xml_signature = b'<?xml '
@@ -430,6 +460,7 @@ def autodetect_deduplicator(args, reader):
 
 
 def abort(message):
+	"""Abandon ship! Use in case of misguided users."""
 	print(message, file=sys.stderr)
 	sys.exit(1)
 
