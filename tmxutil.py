@@ -536,7 +536,7 @@ if __name__ == '__main__':
 		reader = map(IPCGroupLabeler(args.ipc_group_files).annotate, reader)
 
 	if args.with_bifixer_score:
-		reader = filter(lambda unit: unit['score-bifixer'] >= args.with_bifixer_score, reader)
+		reader = filter(lambda unit: float(unit['score-bifixer']) >= args.with_bifixer_score, reader)
 
 	if args.deduplicate:
 		reader = autodetect_deduplicator(args, reader)
