@@ -477,7 +477,7 @@ if __name__ == '__main__':
 	parser.add_argument('-d', '--deduplicate', action='store_true')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append')
 	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append')
-	parser.add_argument('--with-bifixer-score', type=float)
+	parser.add_argument('--with-bicleaner-score', type=float)
 	parser.add_argument('--with-ipc', nargs='+')
 	parser.add_argument('--with-ipc-group', nargs='+')
 	parser.add_argument('--with-text', nargs='+')
@@ -535,8 +535,8 @@ if __name__ == '__main__':
 	if args.ipc_group_files:
 		reader = map(IPCGroupLabeler(args.ipc_group_files).annotate, reader)
 
-	if args.with_bifixer_score:
-		reader = filter(lambda unit: float(unit['score-bifixer']) >= args.with_bifixer_score, reader)
+	if args.with_bicleaner_score:
+		reader = filter(lambda unit: float(unit['score-bicleaner']) >= args.with_bicleaner_score, reader)
 
 	if args.deduplicate:
 		reader = autodetect_deduplicator(args, reader)
