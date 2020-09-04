@@ -498,7 +498,14 @@ def autodetect_deduplicator(args, reader):
 	Make a deduplicate filter based on the input options. Fancy bifixer based
 	deduplicator if we have the data, otherwise fall back to boring deduplicator.
 	"""
-	if args.input_format == 'tab' and 'hash-bifixer' in args.input_columns and 'score-bifixer' in args.input_columns:
+
+	# Grab the first object from the reader to see what we're dealing with
+	peeked_obj = next(reader)
+
+	# Stick the peeked object back on :P
+	reader = chain([peeked_obj], reader)
+
+	if 'hash-bifixer' in peeked_obj and 'score-bifixer' in peeked_obj:
 		return deduplicate(reader,
 			key=itemgetter('hash-bifixer'),
 			compare=lambda best, new: best['score-bifixer'] < new['score-bifixer'])
