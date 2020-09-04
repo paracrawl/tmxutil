@@ -8,6 +8,7 @@ import csv
 import sys
 import time
 import re
+import gzip
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from io import BufferedReader, TextIOWrapper
@@ -419,11 +420,19 @@ def closer(fh):
 	yield from []
 
 
+def is_gzipped(fh):
+	"""Test if stream is probably a gzip stream"""
+	return fh.peek(2).startswith(b'\x1f\x8b')
+
+
 def make_reader(path, args):
 	if path == '-':
 		fh = sys.stdin.buffer
 	else:
 		fh = open(path, 'rb')
+
+	if is_gzipped(fh):
+		fh = gzip.open(fh)
 
 	if not args.input_format:
 		file_format, format_args = autodetect(fh)
