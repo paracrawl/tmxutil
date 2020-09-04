@@ -524,7 +524,7 @@ if __name__ == '__main__':
 
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'])
-	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], required=True)
+	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], default='tmx')
 	parser.add_argument('-l', '--input-languages', nargs=2)
 	parser.add_argument('-c', '--input-columns', nargs='+')
 	parser.add_argument('--output-languages', nargs='+')
