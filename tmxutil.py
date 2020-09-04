@@ -528,6 +528,7 @@ if __name__ == '__main__':
 	parser.add_argument('-l', '--input-languages', nargs=2)
 	parser.add_argument('-c', '--input-columns', nargs='+')
 	parser.add_argument('--output-languages', nargs='+')
+	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
 	parser.add_argument('-d', '--deduplicate', action='store_true')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append')
 	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append')
