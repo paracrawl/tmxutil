@@ -10,13 +10,13 @@ import time
 import re
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from io import BufferedReader
+from io import BufferedReader, TextIOWrapper
 from xml.sax.saxutils import escape, quoteattr
 from xml.etree.ElementTree import iterparse
-from itertools import combinations
+from itertools import combinations, chain
 from collections import defaultdict
 from pprint import pprint
-from typing import Callable, List, Optional, Any, Iterator, Set
+from typing import Callable, List, Optional, Any, Iterator, Set, Tuple
 from operator import itemgetter
 
 class XMLWriter(object):
@@ -408,6 +408,47 @@ def pred_negate(pred: Callable[[dict], bool]) -> Callable[[dict], bool]:
 	return lambda unit: not pred(unit)
 
 
+def parse_properties(props):
+	return dict(prop.split('=', 1) for prop in props.split(','))
+
+
+def closer(fh):
+	"""Generator that closes fh once it it their turn."""
+	if fh.close:
+		fh.close()
+	yield from []
+
+
+def make_reader(path, args):
+	if path == '-':
+		fh = sys.stdin.buffer
+	else:
+		fh = open(path, 'rb')
+
+	if not args.input_format:
+		file_format, format_args = autodetect(fh)
+	else:
+		file_format, format_args = args.input_format, {}
+
+	if file_format == 'tab' and 'columns' not in format_args and args.input_columns:
+		format_args['columns'] = args.input_columns
+
+	fh = TextIOWrapper(fh, encoding='utf-8')
+
+	if file_format == 'tmx':
+		reader = TMXReader(fh)
+	elif file_format == 'tab':
+		if not args.input_languages or len(args.input_languages) != 2:
+			raise ValueError("'tab' format needs exactly two input languages specified")
+		
+		reader = TabReader(fh, *args.input_languages, **format_args)
+	else:
+		raise ValueError("Cannot create file reader for '{}' in format '{}'".format(path, file_format))
+
+	# Hook an empty generator to the end that will close the file we opened.
+	return chain(reader, closer(fh))
+
+
 def peek_first_line(fh, length=128) -> bytes:
 	"""Tries to get the first full line in a buffer that supports peek."""
 	while True:
@@ -423,27 +464,24 @@ def peek_first_line(fh, length=128) -> bytes:
 		buf *= 2
 
 
-def autodetect(args, fh) -> Optional[str]:
+def autodetect(fh) -> Tuple[str, dict]:
 	"""Fill in arguments based on what we can infer from the input we're going
-	to get."""
+	to get. fh needs to have a peek() method and return bytes."""
 
 	# First test: is it XML?
 	xml_signature = b'<?xml '
-	if fh.buffer.peek(len(xml_signature)).startswith(xml_signature):
-		args.input_format = 'xml'
-		return
+	if fh.peek(len(xml_signature)).startswith(xml_signature):
+		return 'tmx', {}
 	
 	# Second test: Might it be tab-separated content? And if so, how many columns?
-	column_count = peek_first_line(fh.buffer).count(b'\t')
+	column_count = peek_first_line(fh).count(b'\t')
 	if column_count >= 7:
-		args.input_format = 'tab'
-		args.input_columns = ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'hash-bifixer', 'score-bifixer', 'score-bicleaner']
-		return
+		return 'tab', {'columns': ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'hash-bifixer', 'score-bifixer', 'score-bicleaner']}
 
 	if column_count >= 5:
-		args.input_format == 'tab'
-		args.input_columns =['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']
-		return
+		return 'tab', {'columns': ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']}
+
+	raise ValueError('Did not recognize file format')
 
 
 def autodetect_deduplicator(args, reader):
@@ -484,39 +522,38 @@ if __name__ == '__main__':
 	parser.add_argument('--without-text', nargs='+')
 	parser.add_argument('--with-source-document', nargs='+')
 	parser.add_argument('--without-source-document', nargs='+')
+	parser.add_argument('files', nargs='*', default='-')
 
-	args = parser.parse_args()
+	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
+	# -p a=2 file2.tmx` etc. but that's only available since Python 3.7.
+	if hasattr(parser, 'parse_intermixed_args'):
+		args = parser.parse_intermixed_args()
+	else:
+		args = parser.parse_args()
 
-	fin = sys.stdin
 	fout = sys.stdout
 
-	reader = None
-	writer = None
 
-	# Autodetect input format if we're lazy
-	if not args.input_format:
-		autodetect(args, fin)
+	# Create reader. Make sure to call make_reader immediately and not somewhere
+	# down in a nested generator so if one of the files cannot be found, we
+	# error out immediately.
+	readers = [make_reader(file, args) for file in args.files]
 
-	# Parameter validation, early warning system
-	if not args.input_format:
-		abort("Use --input-format to specify the input format")
+	# Add properties to each specific file? If so, do it before we chain all
+	# readers into a single iterator. If all share the same properties we'll
+	# add it after chaining multiple readers into one.
+	if args.properties and len(args.properties) > 1:
+		if len(args.properties) != len(readers):
+			abort("When specifying multiple --properties options, you need to specify exactly one for each input file. You have {} --properties options, but {} files.".format(len(args.properties), len(readers)))
+		properties_per_file = (parse_properties(props) for props in args.properties)
+		readers = [({**properties, **unit} for unit in reader) for properties, reader in zip(properties_per_file, readers)]
 
-	if args.input_format == 'tab' and not args.input_languages:
-		abort("Tab input format requires a --input-languages LANG1 LANG2 option.")
+	# Merge all readers into a single source of sentence pairs
+	reader = chain.from_iterable(readers)
 
-	if args.input_format == 'tab' and not args.input_columns:
-		abort("Tab input format requires a --input-columns option.")
-
-	if args.output_languages == 'txt' and (not args.output_languages or len(args.output_languages) != 1):
-		abort("Use --output-languages X to select which language. When writing txt, it can only write one language at a time.")
-
-	# Create reader
-	if args.input_format == 'tmx':
-		reader = TMXReader(fin)
-	elif args.input_format == 'tab':
-		reader = TabReader(fin, *args.input_languages, columns=args.input_columns)
-	else:
-		raise RuntimeError("Could not create input reader")
+	if args.properties and len(args.properties) == 1:
+		properties = parse_properties(args.properties[0])
+		reader = ({**properties, **unit} for unit in reader)
 
 	# Create writer
 	if args.output_format == 'tmx':
@@ -524,9 +561,13 @@ if __name__ == '__main__':
 	elif args.output_format == 'tab':
 		writer = TabWriter(fout, args.output_languages)
 	elif args.output_format == 'txt':
+		if not args.output_languages or len(args.output_languages) != 1:
+			abort("Use --output-languages X to select which language. When writing txt, it can only write one language at a time.")
 		writer = TxtWriter(fout, args.output_languages[0])
 	elif args.output_format == 'py':
 		writer = PyWriter(fout)
+	else:
+		raise ValueError('Unknown output format: {}'.format(args.output_format))
 
 	# Optional filter & annotation steps for reader
 	if args.ipc_meta_files:
