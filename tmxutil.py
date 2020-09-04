@@ -204,7 +204,7 @@ class TMXWriter(Writer):
 			for lang, translation in unit['translations'].items():
 				with self.writer.element('tuv', {'xml:lang': lang}):
 					for key, value in translation.items():
-						if key != 'text':
+						if key not in {'text', 'lang'}:
 							self._write_prop(key, value)
 					with self.writer.element('seg'):
 						self.writer.write(translation['text'])
