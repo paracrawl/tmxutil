@@ -2,7 +2,7 @@
 # Tool to convert between tab, txt and tmx formatting, filtering & adding
 # annotations.
 
-__VERSION__ = 1.0
+__VERSION__ = 1.1
 
 import csv
 import sys
@@ -10,15 +10,22 @@ import time
 import re
 import gzip
 from abc import ABC, abstractmethod
+from argparse import ArgumentParser, FileType, Namespace
+from collections import defaultdict
 from contextlib import contextmanager
 from io import BufferedReader, TextIOWrapper
+from itertools import combinations, chain
+from operator import itemgetter
+from pprint import pprint
+from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple, BinaryIO, TextIO, IO, cast
 from xml.sax.saxutils import escape, quoteattr
 from xml.etree.ElementTree import iterparse
-from itertools import combinations, chain
-from collections import defaultdict
-from pprint import pprint
-from typing import Callable, List, Optional, Any, Iterator, Set, Tuple
-from operator import itemgetter
+
+
+class BufferedBinaryIO(BinaryIO):
+	def peek(self, size: int) -> bytes:
+		pass
+
 
 class XMLWriter(object):
 	"""Writes XML. Light wrapper around iobase.write really, but handles
@@ -130,12 +137,12 @@ class TMXReader(Reader):
 				# Remove element from parent to keep the internal tree empty
 				stack[-1].remove(removed)
 
-		unit = None
-		translation = None
+		unit: dict = {}
+		translation: dict = {}
 
 		lang_key = '{http://www.w3.org/XML/1998/namespace}lang'
 		
-		for event, element in iterparse(self.fh, events={'start', 'end'}):
+		for event, element in iterparse(self.fh, events=('start', 'end')):
 			if event == 'start':
 				enter(element)
 
@@ -290,13 +297,14 @@ class IPCLabeler(object):
 	"""Add IPC labels to sentence pairs based on the patent ids found in the
 	source-document property of either side of the pair."""
 
-	def __init__(self, paths: List[str] = []):
-		self.lut = dict()
-		for path in paths:
-			with open(path, 'r') as fh:
-				self.load(fh)
+	lut: Dict[Tuple[str,str], Set[str]]
 
-	def load(self, fh):
+	def __init__(self, files: List[TextIO] = []):
+		self.lut = dict()
+		for fh in files:
+			self.load(fh)
+
+	def load(self, fh: TextIO):
 		for line in fh:
 			src_id, _, _, _, src_lang, src_ipcs, trg_id, _, _, _, trg_lang, trg_ipcs = line.split('\t', 11)
 			self.lut[(src_lang.lower(), src_id)] = set(ipc.strip() for ipc in src_ipcs.split(','))
@@ -305,20 +313,22 @@ class IPCLabeler(object):
 	def annotate(self, unit: dict) -> dict:
 		for lang, translation in unit['translations'].items():
 			keys = self.lut.keys() & {(lang.lower(), url) for url in translation['source-document']}
-			translation['ipc'] = set().union(*(self.lut[key] for key in keys))
+			# Ignoring type because https://github.com/python/mypy/issues/2013
+			translation['ipc'] = set().union(*(self.lut[key] for key in keys)) # type: ignore
 		return unit
 
 
 class IPCGroupLabeler(object):
 	"""Add overall IPC group ids based on IPC labels added by IPCLabeler."""
 
-	def __init__(self, paths: List[str] = []):
-		self.patterns = []
-		for path in paths:
-			with open(path, 'r') as fh:
-				self.load(fh)
+	patterns: List[Tuple[str,Set[str]]]
 
-	def load(self, fh):
+	def __init__(self, files: List[TextIO] = []):
+		self.patterns = []
+		for fh in files:
+			self.load(fh)
+
+	def load(self, fh: TextIO):
 		for line in fh:
 			prefix, group, *_ = line.split('\t', 2)
 			self.patterns.append((
@@ -329,7 +339,7 @@ class IPCGroupLabeler(object):
 		# Sort with most specific on top
 		self.patterns.sort(key=lambda pattern: (-len(pattern[0]), pattern[0]))
 
-	def find_group(self, ipc_code: str) -> Optional[str]:
+	def find_group(self, ipc_code: str) -> Set[str]:
 		for prefix, groups in self.patterns:
 			if ipc_code.startswith(prefix):
 				return groups
@@ -337,7 +347,7 @@ class IPCGroupLabeler(object):
 
 	def annotate(self, unit: dict) -> dict:
 		for lang, translation in unit['translations'].items():
-			translation['ipc-group'] = set().union(*map(self.find_group, translation['ipc']))
+			translation['ipc-group'] = set().union(*map(self.find_group, translation['ipc'])) # type: ignore
 		return unit
 
 
@@ -345,7 +355,7 @@ def text_key(unit: dict) -> tuple:
 	return tuple(translation['text'] for translation in unit['translations'].values())
 
 
-def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Callable[[dict, dict], bool] = lambda _: False) -> Iterator[dict]:
+def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Callable[[dict, dict], bool] = lambda curr, new: False) -> Iterator[dict]:
 	"""
 	Deduplicate records read from reader. It does this by creating a hash table
 	of all records, grouped by key(record). If multiple records have the same
@@ -356,7 +366,7 @@ def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Cal
 	results once reader has run out of records.
 	"""
 
-	best = dict()
+	best: dict = dict()
 
 	for unit in reader:
 		unit_id = hash(key(unit))
@@ -413,26 +423,21 @@ def parse_properties(props):
 	return dict(prop.split('=', 1) for prop in props.split(','))
 
 
-def closer(fh):
+def closer(fh: IO):
 	"""Generator that closes fh once it it their turn."""
 	if fh.close:
 		fh.close()
 	yield from []
 
 
-def is_gzipped(fh):
+def is_gzipped(fh: BufferedBinaryIO):
 	"""Test if stream is probably a gzip stream"""
 	return fh.peek(2).startswith(b'\x1f\x8b')
 
 
-def make_reader(path, args):
-	if path == '-':
-		fh = sys.stdin.buffer
-	else:
-		fh = open(path, 'rb')
-
+def make_reader(fh: BufferedBinaryIO, args: Namespace) -> Iterator[dict]:
 	if is_gzipped(fh):
-		fh = gzip.open(fh)
+		fh = cast(BufferedBinaryIO, gzip.open(fh))
 
 	if not args.input_format:
 		file_format, format_args = autodetect(fh)
@@ -442,23 +447,23 @@ def make_reader(path, args):
 	if file_format == 'tab' and 'columns' not in format_args and args.input_columns:
 		format_args['columns'] = args.input_columns
 
-	fh = TextIOWrapper(fh, encoding='utf-8')
+	text_fh = TextIOWrapper(fh, encoding='utf-8')
 
 	if file_format == 'tmx':
-		reader = TMXReader(fh)
+		reader = TMXReader(text_fh) # type: Reader
 	elif file_format == 'tab':
 		if not args.input_languages or len(args.input_languages) != 2:
 			raise ValueError("'tab' format needs exactly two input languages specified")
 		
-		reader = TabReader(fh, *args.input_languages, **format_args)
+		reader = TabReader(text_fh, *args.input_languages, **format_args)
 	else:
-		raise ValueError("Cannot create file reader for '{}' in format '{}'".format(path, file_format))
+		raise ValueError("Cannot create file reader for format '{}'".format(file_format))
 
 	# Hook an empty generator to the end that will close the file we opened.
-	return chain(reader, closer(fh))
+	return chain(reader, closer(text_fh))
 
 
-def peek_first_line(fh, length=128) -> bytes:
+def peek_first_line(fh: BufferedBinaryIO, length=128) -> bytes:
 	"""Tries to get the first full line in a buffer that supports peek."""
 	while True:
 		buf = fh.peek(length)
@@ -473,7 +478,7 @@ def peek_first_line(fh, length=128) -> bytes:
 		buf *= 2
 
 
-def autodetect(fh) -> Tuple[str, dict]:
+def autodetect(fh: BufferedBinaryIO) -> Tuple[str, dict]:
 	"""Fill in arguments based on what we can infer from the input we're going
 	to get. fh needs to have a peek() method and return bytes."""
 
@@ -520,8 +525,6 @@ def abort(message):
 
 
 if __name__ == '__main__':
-	from argparse import ArgumentParser
-
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'])
 	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], default='tmx')
@@ -530,8 +533,8 @@ if __name__ == '__main__':
 	parser.add_argument('--output-languages', nargs='+')
 	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
 	parser.add_argument('-d', '--deduplicate', action='store_true')
-	parser.add_argument('--ipc', dest='ipc_meta_files', action='append')
-	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append')
+	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'))
+	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'))
 	parser.add_argument('--with-bicleaner-score', type=float)
 	parser.add_argument('--with-ipc', nargs='+')
 	parser.add_argument('--with-ipc-group', nargs='+')
@@ -539,7 +542,7 @@ if __name__ == '__main__':
 	parser.add_argument('--without-text', nargs='+')
 	parser.add_argument('--with-source-document', nargs='+')
 	parser.add_argument('--without-source-document', nargs='+')
-	parser.add_argument('files', nargs='*', default='-')
+	parser.add_argument('files', nargs='*', default=sys.stdin, type=FileType('rb'))
 
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
 	# -p a=2 file2.tmx` etc. but that's only available since Python 3.7.
@@ -574,7 +577,7 @@ if __name__ == '__main__':
 
 	# Create writer
 	if args.output_format == 'tmx':
-		writer = TMXWriter(fout)
+		writer = TMXWriter(fout) # type: Writer
 	elif args.output_format == 'tab':
 		writer = TabWriter(fout, args.output_languages)
 	elif args.output_format == 'txt':
