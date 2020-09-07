@@ -554,25 +554,23 @@ def abort(message: str) -> int:
 
 def main(args, stdin, stdout) -> int:
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
-	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'])
-	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], default='tmx')
-	parser.add_argument('-l', '--input-languages', nargs=2)
-	parser.add_argument('-c', '--input-columns', nargs='+')
-	parser.add_argument('--output-languages', nargs='+')
-	parser.add_argument('-p', '--properties', action='append', help='List of'
-		' A=B,C=D properties to add to each sentence pair. You can use one'
-		' --properties for all files or one for each input file.')
-	parser.add_argument('-d', '--deduplicate', action='store_true')
-	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'))
-	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'))
-	parser.add_argument('--with-bicleaner-score', type=float)
-	parser.add_argument('--with-ipc', nargs='+')
-	parser.add_argument('--with-ipc-group', nargs='+')
-	parser.add_argument('--with-text', nargs='+')
-	parser.add_argument('--without-text', nargs='+')
-	parser.add_argument('--with-source-document', nargs='+')
-	parser.add_argument('--without-source-document', nargs='+')
-	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'))
+	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'], help='Input file format. Automatically detected if left unspecified.')
+	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], default='tmx', help='Output file format. Output is always written to stdout.')
+	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
+	parser.add_argument('-c', '--input-columns', nargs='+', help='Input columns in case of tab input. Column names ending in -1 or -2 will be treated as translation-specific.')
+	parser.add_argument('--output-languages', nargs='+', help='Output languages for tab and txt output. txt output allows only one language, tab multiple.')
+	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
+	parser.add_argument('-d', '--deduplicate', action='store_true', help='Deduplicate units before printing. Unit properties are combined where possible. If score-bifixer and hash-bifixer are avaiable, these will be used.')
+	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'), help='One or more IPC metadata files.')
+	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'), help='One or more IPC grouping files.')
+	parser.add_argument('--with-bicleaner-score', type=float, help='Bicleaner score threshold.')
+	parser.add_argument('--with-ipc', nargs='+', help='Select only units with one of these IPC codes.')
+	parser.add_argument('--with-ipc-group', nargs='+', help='Select only units with one of these IPC grouping codes.')
+	parser.add_argument('--with-text', nargs='+', help='Select only units containing these text segments.')
+	parser.add_argument('--without-text', nargs='+', help='Filter units that contain any of these text segments.')
+	parser.add_argument('--with-source-document', nargs='+', help='Select only units by document codes.')
+	parser.add_argument('--without-source-document', nargs='+', help='Filter units by document codes.')
+	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'), help='Input files. May be gzipped. If not specified stdin is used.')
 
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
 	# -p a=2 file2.tmx` etc. but that's only available since Python 3.7.
