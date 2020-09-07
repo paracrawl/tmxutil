@@ -1,0 +1,58 @@
+When a tab file goes in, by default tmx should come out.
+
+```sh
+$ echo "ID 1\tID 2\tSentence 1\tSentence 2\t1.0" > text.tab
+$ ../tmxutil.py < text.tab
+@ Error: 'tab' format needs exactly two input languages specified
+? 1
+```
+
+But! You have to specify a language using --input-language (or -l).
+
+(Note that I'm also specifying a --creation-date option to make the output static for easy testing.)
+
+When you give it tabs and proper info about the language, it should output xml.
+```sh
+$ echo "ID 1\tID 2\tSentence 1\tSentence 2\t1.0" > text.tab
+$ ../tmxutil.py --creation-date 2020-01-01 -l l1 l2 < text.tab
+| <?xml version="1.0"?>
+| <tmx version="1.4">
+|   <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>
+|   <body>
+|     <tu tuid="0" datatype="Text">
+|       <prop type="score-aligner">1.0</prop>
+|       <tuv xml:lang="l1">
+|         <prop type="source-document">ID 1</prop>
+|         <seg>Sentence 1</seg>
+|       </tuv>
+|       <tuv xml:lang="l2">
+|         <prop type="source-document">ID 2</prop>
+|         <seg>Sentence 2</seg>
+|       </tuv>
+|     </tu>
+|   </body>
+| </tmx>
+```
+
+It should not matter whether that tab-delimited file has trailing newlines.
+```sh
+$ echo "ID 1\tID 2\tSentence 1\tSentence 2\t1.0\n\n" > text.tab
+$ ../tmxutil.py --creation-date 2020-01-01 -l l1 l2 < text.tab
+| <?xml version="1.0"?>
+| <tmx version="1.4">
+|   <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>
+|   <body>
+|     <tu tuid="0" datatype="Text">
+|       <prop type="score-aligner">1.0</prop>
+|       <tuv xml:lang="l1">
+|         <prop type="source-document">ID 1</prop>
+|         <seg>Sentence 1</seg>
+|       </tuv>
+|       <tuv xml:lang="l2">
+|         <prop type="source-document">ID 2</prop>
+|         <seg>Sentence 2</seg>
+|       </tuv>
+|     </tu>
+|   </body>
+| </tmx>
+```

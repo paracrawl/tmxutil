@@ -1,0 +1,42 @@
+When XML goes in, I expect the same XML to come out. Exception for the <header/> though.
+
+```sh
+$ echo '<?xml version="1.0"?>\n' \
+ '<tmx version="1.4">\n' \
+ '  <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>\n' \
+ '  <body>\n' \
+ '    <tu tuid="0" datatype="Text">\n' \
+ '      <prop type="made-up">Beep boop</prop>\n' \
+ '      <prop type="score-aligner">1.0</prop>\n' \
+ '      <tuv xml:lang="l1">\n' \
+ '        <prop type="source-document">ID 1</prop>\n' \
+ '        <prop type="source-document">ID 100</prop>\n' \
+ '        <seg>Sentence 1</seg>\n' \
+ '      </tuv>\n' \
+ '      <tuv xml:lang="l2">\n' \
+ '        <prop type="source-document">ID 2</prop>\n' \
+ '        <seg>Sentence 2</seg>\n' \
+ '      </tuv>\n' \
+ '    </tu>\n' \
+ '  </body>\n' \
+ '</tmx>\n' | ../tmxutil.py --creation-date 2020-01-01
+| <?xml version="1.0"?>
+| <tmx version="1.4">
+|   <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>
+|   <body>
+|     <tu tuid="0" datatype="Text">
+|       <prop type="made-up">Beep boop</prop>
+|       <prop type="score-aligner">1.0</prop>
+|       <tuv xml:lang="l1">
+|         <prop type="source-document">ID 1</prop>
+|         <prop type="source-document">ID 100</prop>
+|         <seg>Sentence 1</seg>
+|       </tuv>
+|       <tuv xml:lang="l2">
+|         <prop type="source-document">ID 2</prop>
+|         <seg>Sentence 2</seg>
+|       </tuv>
+|     </tu>
+|   </body>
+| </tmx>
+```
