@@ -228,7 +228,7 @@ class TMXWriter(Writer):
 		if value is None:
 			return
 		elif isinstance(value, (list, set)):
-			for val in value:
+			for val in sorted(value):
 				self._write_prop(name, val)
 		else:
 			with self.writer.element('prop', {'type': name}) as prop:
@@ -236,12 +236,12 @@ class TMXWriter(Writer):
 
 	def write(self, unit):
 		with self.writer.element('tu', {'tuid': unit['id'], 'datatype': 'Text'}):
-			for key, value in unit.items():
+			for key, value in sorted(unit.items()):
 				if key not in {'id', 'translations'}:
 					self._write_prop(key, value)
-			for lang, translation in unit['translations'].items():
+			for lang, translation in sorted(unit['translations'].items()):
 				with self.writer.element('tuv', {'xml:lang': lang}):
-					for key, value in translation.items():
+					for key, value in sorted(translation.items()):
 						if key not in {'text', 'lang'}:
 							self._write_prop(key, value)
 					with self.writer.element('seg'):
