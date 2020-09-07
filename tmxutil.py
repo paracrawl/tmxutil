@@ -672,4 +672,7 @@ def main(args, stdin, stdout) -> int:
 
 
 if __name__ == '__main__':
-	sys.exit(main(sys.argv[1:], sys.stdin, sys.stdout))
+	try:
+		sys.exit(main(sys.argv[1:], sys.stdin, sys.stdout))
+	except ValueError as e:
+		sys.exit(abort("Error: {}".format(e)))
