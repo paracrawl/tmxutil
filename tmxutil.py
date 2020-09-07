@@ -6,13 +6,13 @@ __VERSION__ = 1.1
 
 import csv
 import sys
-import time
 import re
 import gzip
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace
 from collections import defaultdict
 from contextlib import contextmanager
+from datetime import datetime
 from io import BufferedReader, TextIOWrapper
 from itertools import combinations, chain
 from logging import warning
@@ -194,23 +194,30 @@ class TMXReader(Reader):
 
 
 class TMXWriter(Writer):
-	def __init__(self, fh):
+	def __init__(self, fh, *, creation_date: datetime = None):
 		self.fh = fh
+		self.creation_date = creation_date
 		
 	def __enter__(self):
 		self.writer = XMLWriter(self.fh)
 		self.writer.__enter__()
 		self.writer.open('tmx', {'version': 1.4})
-		with self.writer.element('header', {
+
+		args = {
 			'o-tmf': 'PlainText',
 			'creationtool': 'tab2tmx.py',
 			'creationtoolversion': __VERSION__,
 			'datatype': 'PlainText',
 			'segtype': 'sentence',
-			'creationdate': time.strftime("%Y%m%dT%H%M%S"),
-			'o-encoding': 'utf-8'
-			}) as header:
-			pass
+			'o-encoding': 'utf-8',
+		}
+
+		if self.creation_date is not None:
+			args['creationdate'] = self.creation_date.strftime("%Y%m%dT%H%M%S")
+
+		with self.writer.element('header', args) as header:
+			pass # Immediately close <header> again.
+		
 		self.writer.open('body')
 		return self
 
@@ -559,6 +566,7 @@ def main(args, stdin, stdout) -> int:
 	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
 	parser.add_argument('-c', '--input-columns', nargs='+', help='Input columns in case of tab input. Column names ending in -1 or -2 will be treated as translation-specific.')
 	parser.add_argument('--output-languages', nargs='+', help='Output languages for tab and txt output. txt output allows only one language, tab multiple.')
+	parser.add_argument('--creation-date', type=datetime.fromisoformat, default=datetime.now(), help='override creation date in tmx output.')
 	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
 	parser.add_argument('-d', '--deduplicate', action='store_true', help='Deduplicate units before printing. Unit properties are combined where possible. If score-bifixer and hash-bifixer are avaiable, these will be used.')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'), help='One or more IPC metadata files.')
@@ -606,7 +614,7 @@ def main(args, stdin, stdout) -> int:
 
 	# Create writer
 	if args.output_format == 'tmx':
-		writer = TMXWriter(fout) # type: Writer
+		writer = TMXWriter(fout, creation_date=args.creation_date) # type: Writer
 	elif args.output_format == 'tab':
 		writer = TabWriter(fout, args.output_languages)
 	elif args.output_format == 'txt':
