@@ -22,6 +22,16 @@ from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple, Bi
 from xml.sax.saxutils import escape, quoteattr
 from xml.etree.ElementTree import iterparse
 
+# Only Python 3.7+ has fromisoformat
+if hasattr(datetime, 'fromisoformat'):
+	fromisoformat = datetime.fromisoformat
+else:
+	def fromisoformat(datestr) -> datetime:
+		match = re.match(r'^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:.(?P<hour>\d{2})(?::(?P<minute>\d{2})(?::(?P<second>\d{2}))?)?)?$', datestr)
+		if match is None:
+			raise ValueError("invalid fromisoformat value: '{}'".format(datestr))
+		return datetime(**{key: int(val) for key, val in match.groupdict(None).items() if val is not None})
+
 
 class BufferedBinaryIO(BinaryIO):
 	def peek(self, size: int) -> bytes:
@@ -570,7 +580,7 @@ def main(args, stdin, stdout) -> int:
 	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
 	parser.add_argument('-c', '--input-columns', nargs='+', help='Input columns in case of tab input. Column names ending in -1 or -2 will be treated as translation-specific.')
 	parser.add_argument('--output-languages', nargs='+', help='Output languages for tab and txt output. txt output allows only one language, tab multiple.')
-	parser.add_argument('--creation-date', type=datetime.fromisoformat, default=datetime.now(), help='override creation date in tmx output.')
+	parser.add_argument('--creation-date', type=fromisoformat, default=datetime.now(), help='override creation date in tmx output.')
 	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
 	parser.add_argument('-d', '--deduplicate', action='store_true', help='Deduplicate units before printing. Unit properties are combined where possible. If score-bifixer and hash-bifixer are avaiable, these will be used.')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'), help='One or more IPC metadata files.')
