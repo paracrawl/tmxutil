@@ -523,7 +523,7 @@ def autodetect(fh: BufferedBinaryIO) -> Tuple[str, dict]:
 		return 'tmx', {}
 	
 	# Second test: Might it be tab-separated content? And if so, how many columns?
-	column_count = peek_first_line(fh).count(b'\t')
+	column_count = 1 + peek_first_line(fh).count(b'\t')
 	if column_count >= 7:
 		return 'tab', {'columns': ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'hash-bifixer', 'score-bifixer', 'score-bicleaner']}
 
