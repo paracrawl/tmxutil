@@ -37,15 +37,25 @@ class XMLWriter(object):
 		self.indent = '  '
 
 	def open(self, name: str, attributes: dict = dict()):
+		"""Write open tag."""
+
 		if self.stack:
 			self.stack[-1] = (self.stack[-1][0], True)
 
-		attr_str = ''.join(' {}={}'.format(attr_name, quoteattr(str(attr_value))) for attr_name, attr_value in attributes.items())
-		self.fh.write('\n{}<{}{}>'.format(self.indent * len(self.stack), name, attr_str))
+		out = '\n' + (self.indent * len(self.stack)) + '<' + name
+
+		for attr_name, attr_value in attributes.items():
+			out += ' ' + attr_name + '=' + quoteattr(str(attr_value))
+
+		out += '>'
+
+		self.fh.write(out)
 
 		self.stack.append((name, False))
 
 	def close(self):
+		"""Write close tag. Will use stack to determine which element."""
+
 		name, has_children = self.stack.pop()
 		if has_children:
 			self.fh.write('\n{}</{}>'.format(self.indent * len(self.stack), name))
@@ -57,6 +67,9 @@ class XMLWriter(object):
 
 	@contextmanager
 	def element(self, name: str, attributes: dict = dict()):
+		"""Context wrapper that automatically closes element once you leave
+		the context."""
+		
 		self.open(name, attributes)
 		yield self
 		self.close()
