@@ -15,6 +15,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from io import BufferedReader, TextIOWrapper
 from itertools import combinations, chain
+from logging import warning
 from operator import itemgetter
 from pprint import pprint
 from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple, BinaryIO, TextIO, IO, cast
@@ -170,14 +171,24 @@ class TMXReader(Reader):
 				if path == ['tmx', 'body', 'tu']:
 					yield unit
 				elif path == ['tmx', 'body', 'tu', 'prop']:
-					unit[element.get('type')] = float(element.text.strip()) if 'score' in element.get('type') else element.text.strip()
+					if element.text is None:
+						warning('Warning: empty <prop type="%s"></prop> encountered; property ignored', element.get('type'))
+					else:
+						unit[element.get('type')] = float(element.text.strip()) if 'score' in element.get('type') else element.text.strip()
 				elif path == ['tmx', 'body', 'tu', 'tuv']:
 					unit['translations'][element.attrib[lang_key]] = translation
 					translations = None
 				elif path == ['tmx', 'body', 'tu', 'tuv', 'prop']:
-					translation[element.get('type')].add(element.text.strip())
+					if element.text is None:
+						warning('Warning: empty <prop type="%s"></prop> encountered; property ignored', element.get('type'))
+					else:
+						translation[element.get('type')].add(element.text.strip())
 				elif path == ['tmx', 'body', 'tu', 'tuv', 'seg']:
-					translation['text'] = element.text.strip()
+					if element.text is None:
+						warning('Warning: empty translation segment encountered')
+						translation['text'] = ''
+					else:
+						translation['text'] = element.text.strip()
 
 				exit(element)
 
@@ -535,7 +546,7 @@ def autodetect_deduplicator(args, reader):
 		return deduplicate(reader, key=text_key)
 
 
-def abort(message):
+def abort(message: str) -> int:
 	"""Abandon ship! Use in case of misguided users."""
 	print(message, file=sys.stderr)
 	return 1
