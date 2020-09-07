@@ -150,8 +150,8 @@ class TMXReader(Reader):
 				# Remove element from parent to keep the internal tree empty
 				stack[-1].remove(removed)
 
-		unit: dict = {}
-		translation: dict = {}
+		unit = {} # type: dict
+		translation= {} # type: dict
 
 		lang_key = '{http://www.w3.org/XML/1998/namespace}lang'
 		
@@ -310,10 +310,10 @@ class IPCLabeler(object):
 	"""Add IPC labels to sentence pairs based on the patent ids found in the
 	source-document property of either side of the pair."""
 
-	lut: Dict[Tuple[str,str], Set[str]]
+	#lut: Dict[Tuple[str,str], Set[str]]
 
 	def __init__(self, files: List[TextIO] = []):
-		self.lut = dict()
+		self.lut = dict() # type: Dict[Tuple[str,str], Set[str]]
 		for fh in files:
 			self.load(fh)
 
@@ -334,10 +334,10 @@ class IPCLabeler(object):
 class IPCGroupLabeler(object):
 	"""Add overall IPC group ids based on IPC labels added by IPCLabeler."""
 
-	patterns: List[Tuple[str,Set[str]]]
+	#patterns: List[Tuple[str,Set[str]]]
 
 	def __init__(self, files: List[TextIO] = []):
-		self.patterns = []
+		self.patterns = [] # type: List[Tuple[str,Set[str]]]
 		for fh in files:
 			self.load(fh)
 
@@ -379,7 +379,7 @@ def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Cal
 	results once reader has run out of records.
 	"""
 
-	best: dict = dict()
+	best = dict() # type: dict
 
 	for unit in reader:
 		unit_id = hash(key(unit))
@@ -449,8 +449,6 @@ def is_gzipped(fh: BufferedBinaryIO):
 
 
 def make_reader(fh: BufferedBinaryIO, args: Namespace) -> Iterator[dict]:
-	pprint(fh)
-
 	if is_gzipped(fh):
 		fh = cast(BufferedBinaryIO, gzip.open(fh))
 
