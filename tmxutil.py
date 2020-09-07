@@ -257,6 +257,10 @@ class TabReader(Reader):
 
 	def records(self) -> Iterator[dict]:
 		for n, line in enumerate(self.fh):
+			# Skip blank lines
+			if line.strip() == '':
+				continue
+
 			values = line.split('\t')
 
 			record = {
