@@ -518,7 +518,11 @@ def autodetect_deduplicator(args, reader):
 	"""
 
 	# Grab the first object from the reader to see what we're dealing with
-	peeked_obj = next(reader)
+	try:
+		peeked_obj = next(reader)
+	except StopIteration:
+		# It's an empty reader. No need to wrap it in anything deduplicating.
+		return reader
 
 	# Stick the peeked object back on :P
 	reader = chain([peeked_obj], reader)
