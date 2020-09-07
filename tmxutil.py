@@ -436,6 +436,8 @@ def is_gzipped(fh: BufferedBinaryIO):
 
 
 def make_reader(fh: BufferedBinaryIO, args: Namespace) -> Iterator[dict]:
+	pprint(fh)
+
 	if is_gzipped(fh):
 		fh = cast(BufferedBinaryIO, gzip.open(fh))
 
@@ -521,17 +523,19 @@ def autodetect_deduplicator(args, reader):
 def abort(message):
 	"""Abandon ship! Use in case of misguided users."""
 	print(message, file=sys.stderr)
-	sys.exit(1)
+	return 1
 
 
-if __name__ == '__main__':
+def main(args, stdin, stdout) -> int:
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'])
 	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], default='tmx')
 	parser.add_argument('-l', '--input-languages', nargs=2)
 	parser.add_argument('-c', '--input-columns', nargs='+')
 	parser.add_argument('--output-languages', nargs='+')
-	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
+	parser.add_argument('-p', '--properties', action='append', help='List of'
+		' A=B,C=D properties to add to each sentence pair. You can use one'
+		' --properties for all files or one for each input file.')
 	parser.add_argument('-d', '--deduplicate', action='store_true')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'))
 	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'))
@@ -542,29 +546,30 @@ if __name__ == '__main__':
 	parser.add_argument('--without-text', nargs='+')
 	parser.add_argument('--with-source-document', nargs='+')
 	parser.add_argument('--without-source-document', nargs='+')
-	parser.add_argument('files', nargs='*', default=sys.stdin, type=FileType('rb'))
+	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'))
 
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
 	# -p a=2 file2.tmx` etc. but that's only available since Python 3.7.
 	if hasattr(parser, 'parse_intermixed_args'):
-		args = parser.parse_intermixed_args()
+		args = parser.parse_intermixed_args(args)
 	else:
-		args = parser.parse_args()
+		args = parser.parse_args(args)
 
-	fout = sys.stdout
-
+	fout = stdout
 
 	# Create reader. Make sure to call make_reader immediately and not somewhere
 	# down in a nested generator so if one of the files cannot be found, we
 	# error out immediately.
-	readers = [make_reader(file, args) for file in args.files]
+	readers = [make_reader(fh, args) for fh in args.files]
 
 	# Add properties to each specific file? If so, do it before we chain all
 	# readers into a single iterator. If all share the same properties we'll
 	# add it after chaining multiple readers into one.
 	if args.properties and len(args.properties) > 1:
 		if len(args.properties) != len(readers):
-			abort("When specifying multiple --properties options, you need to specify exactly one for each input file. You have {} --properties options, but {} files.".format(len(args.properties), len(readers)))
+			return abort("When specifying multiple --properties options, you need"
+			             " to specify exactly one for each input file. You have {}"
+			             " --properties options, but {} files.".format(len(args.properties), len(readers)))
 		properties_per_file = (parse_properties(props) for props in args.properties)
 		readers = [({**properties, **unit} for unit in reader) for properties, reader in zip(properties_per_file, readers)]
 
@@ -582,7 +587,9 @@ if __name__ == '__main__':
 		writer = TabWriter(fout, args.output_languages)
 	elif args.output_format == 'txt':
 		if not args.output_languages or len(args.output_languages) != 1:
-			abort("Use --output-languages X to select which language. When writing txt, it can only write one language at a time.")
+			return abort("Use --output-languages X to select which language."
+			             " When writing txt, it can only write one language at"
+			             " a time.")
 		writer = TxtWriter(fout, args.output_languages[0])
 	elif args.output_format == 'py':
 		writer = PyWriter(fout)
@@ -624,3 +631,9 @@ if __name__ == '__main__':
 	with writer:
 		for unit in reader:
 			writer.write(unit)
+
+	return 0
+
+
+if __name__ == '__main__':
+	sys.exit(main(sys.argv[1:], sys.stdin, sys.stdout))
