@@ -15,8 +15,9 @@ from argparse import ArgumentParser, FileType, Namespace
 from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
 from datetime import datetime
+from functools import partial
 from io import BufferedReader, TextIOWrapper
-from itertools import combinations, chain
+from itertools import combinations, chain, starmap
 from logging import info, warning, getLogger, INFO
 from operator import itemgetter
 from pprint import pprint
@@ -532,6 +533,11 @@ def pred_negate(pred: Callable[[dict], bool]) -> Callable[[dict], bool]:
 	return lambda unit: not pred(unit)
 
 
+def set_property(key: str, value: Any, unit: dict) -> dict:
+	unit[key] = value
+	return unit
+
+
 def parse_properties(props):
 	return dict(prop.split('=', 1) for prop in props.split(','))
 
@@ -649,6 +655,7 @@ def main(args, stdin, stdout) -> int:
 	parser.add_argument('--creation-date', type=fromisoformat, default=datetime.now(), help='override creation date in tmx output.')
 	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
 	parser.add_argument('-d', '--deduplicate', action='store_true', help='Deduplicate units before printing. Unit properties are combined where possible. If score-bifixer and hash-bifixer are avaiable, these will be used.')
+	parser.add_argument('--renumber-output', action='store_true', help='Renumber the translation unit ids. Always enabled when multiple input files are given.')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'), help='One or more IPC metadata files.')
 	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'), help='One or more IPC grouping files.')
 	parser.add_argument('--with-bicleaner-score', type=float, help='Bicleaner score threshold.')
@@ -742,6 +749,11 @@ def main(args, stdin, stdout) -> int:
 
 	if args.without_source_document:
 		reader = filter(pred_negate(pred_translation_prop_intersection('source-document', set(args.without_source_document))), reader)
+
+	# If we have multiple input files, the translation unit ids will be a mess
+	# when merged. So renumber them. Otherwise keep them as is.
+	if len(readers) > 1 or args.renumber_output:
+		reader = starmap(partial(set_property, 'id'), enumerate(reader, start=1))
 
 	# Main loop. with statement for writer so it can write header & footer
 	with writer:
