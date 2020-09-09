@@ -538,6 +538,12 @@ def set_property(key: str, value: Any, unit: dict) -> dict:
 	return unit
 
 
+def del_properties(properties: List[str], unit: dict) -> dict:
+	for prop in properties:
+		del unit[prop]
+	return unit
+
+
 def parse_properties(props):
 	return dict(prop.split('=', 1) for prop in props.split(','))
 
@@ -655,6 +661,7 @@ def main(args, stdin, stdout) -> int:
 	parser.add_argument('--creation-date', type=fromisoformat, default=datetime.now(), help='override creation date in tmx output.')
 	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
 	parser.add_argument('-d', '--deduplicate', action='store_true', help='Deduplicate units before printing. Unit properties are combined where possible. If score-bifixer and hash-bifixer are avaiable, these will be used.')
+	parser.add_argument('--drop', nargs='+', dest='drop_properties', help='Drop properties from output.')
 	parser.add_argument('--renumber-output', action='store_true', help='Renumber the translation unit ids. Always enabled when multiple input files are given.')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'), help='One or more IPC metadata files.')
 	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'), help='One or more IPC grouping files.')
@@ -754,6 +761,9 @@ def main(args, stdin, stdout) -> int:
 	# when merged. So renumber them. Otherwise keep them as is.
 	if len(readers) > 1 or args.renumber_output:
 		reader = starmap(partial(set_property, 'id'), enumerate(reader, start=1))
+
+	if args.drop_properties:
+		reader = map(partial(del_properties, args.drop_properties), reader)
 
 	# Main loop. with statement for writer so it can write header & footer
 	with writer:
