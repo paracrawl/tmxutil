@@ -358,8 +358,8 @@ class IPCLabeler(object):
 	def load(self, fh: TextIO):
 		for line in fh:
 			src_id, _, _, _, src_lang, src_ipcs, trg_id, _, _, _, trg_lang, trg_ipcs = line.split('\t', 11)
-			self.lut[(src_lang.lower(), src_id)] = set(ipc.strip() for ipc in src_ipcs.split(','))
-			self.lut[(trg_lang.lower(), trg_id)] = set(ipc.strip() for ipc in trg_ipcs.split(','))
+			self.lut[(src_lang.lower(), src_id)] = set(ipc.strip() for ipc in src_ipcs.split(',') if ipc.strip() != '')
+			self.lut[(trg_lang.lower(), trg_id)] = set(ipc.strip() for ipc in trg_ipcs.split(',') if ipc.strip() != '')
 
 	def annotate(self, unit: dict) -> dict:
 		for lang, translation in unit['translations'].items():
