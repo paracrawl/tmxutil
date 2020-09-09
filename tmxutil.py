@@ -9,6 +9,7 @@ import sys
 import re
 import gzip
 import pickle
+import resource
 from abc import ABC, ABCMeta, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace
 from collections import defaultdict, OrderedDict
@@ -414,19 +415,36 @@ def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], sort_key: Ca
 	
 	Note: This function behaves like an iterator but will only start yielding
 	results once reader has run out of records.
+
+	Note: If the memory usage becomes too large (because storing all unique
+	units is taking up too much storage) it will fall back to deduplicate_external
+	which uses a file as backing for temporarily storing translation units.
 	"""
 
 	best = dict() # type: dict
 
-	for unit in reader:
+	try:
+		first_unit = next(reader)
+	except StopIteration:
+		return reader
+
+	for n, unit in enumerate(chain([first_unit], reader), start=1):
 		unit_id = hash(key(unit))
 
 		if unit_id in best:
 			best[unit_id] = deduplicate_merge(best[unit_id], unit, sort_key)
 		else:
 			best[unit_id] = unit
-	
-	yield from best.values()
+		
+			if n % 10_000 == 0:
+				mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+				if mem_usage > 2 * 10**9:
+					already_processed = best.values()
+					del best
+					yield from deduplicate_external(chain(already_processed, reader), key, sort_key)
+					break
+	else:
+		yield from best.values()
 
 
 def deduplicate_external(reader: Iterator[dict], key: Callable[[dict], Any], sort_key: Callable[[dict], Any] = lambda unit: 0) -> Iterator[dict]:
@@ -596,7 +614,7 @@ def autodetect_deduplicator(args, reader):
 	reader = chain([peeked_obj], reader)
 
 	if 'hash-bifixer' in peeked_obj and 'score-bifixer' in peeked_obj:
-		return deduplicate_external(reader, key=itemgetter('hash-bifixer'), sort_key=itemgetter('score-bifixer'))
+		return deduplicate(reader, key=itemgetter('hash-bifixer'), sort_key=itemgetter('score-bifixer'))
 	else:
 		return deduplicate(reader, key=text_key)
 
