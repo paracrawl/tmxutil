@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from io import BufferedReader, TextIOWrapper
 from itertools import combinations, chain
-from logging import warning
+from logging import info, warning, getLogger, INFO
 from operator import itemgetter
 from pprint import pprint
 from tempfile import TemporaryFile
@@ -154,6 +154,8 @@ class TMXReader(Reader):
 	def records(self) -> Iterator[dict]:
 		path = []
 		stack = []
+
+		info("TMXReader starts reading from %s", self.fh.name)
 		
 		def enter(element):
 			stack.append(element)
@@ -438,7 +440,9 @@ def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], sort_key: Ca
 		
 			if n % 10_000 == 0:
 				mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+				info('best contains %d (%d processed) entries (%1.2f GB)', len(best), n, mem_usage / 10**9)
 				if mem_usage > 2 * 10**9:
+					info("Exceeded in-memory size limit, switching to file-backed deduplication")
 					already_processed = best.values()
 					del best
 					yield from deduplicate_external(chain(already_processed, reader), key, sort_key)
@@ -451,7 +455,7 @@ def deduplicate_external(reader: Iterator[dict], key: Callable[[dict], Any], sor
 	best = OrderedDict() # type: dict
 
 	with TemporaryFile() as fh:
-		for unit in reader:
+		for n, unit in enumerate(reader, start=1):
 			offset = fh.tell()
 
 			pickle.dump(unit, fh)
@@ -463,7 +467,14 @@ def deduplicate_external(reader: Iterator[dict], key: Callable[[dict], Any], sor
 			else:
 				best[unit_id] = [offset]
 
-		for duplicates in best.values():
+			if n % 10_000 == 0:
+				mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+				disk_usage = fh.tell()
+				info('best contains %d (%d processed) entries (mem: %1.2f GB, disk: %1.2f GB)', len(best), n, mem_usage / 10**9, disk_usage / 10**9)
+
+		info('All entries inspected, %d unique entries; building output', len(best))
+
+		for n, duplicates in enumerate(best.values(), start=1):
 			best_unit = dict() # type: dict
 
 			for offset in duplicates:
@@ -474,6 +485,9 @@ def deduplicate_external(reader: Iterator[dict], key: Callable[[dict], Any], sor
 					best_unit = unit
 				else:
 					best_unit = deduplicate_merge(best_unit, unit, sort_key)
+
+			if n % 10_000 == 0:
+				info('%d out of %d built', n, len(best))
 
 			yield best_unit
 
@@ -644,6 +658,7 @@ def main(args, stdin, stdout) -> int:
 	parser.add_argument('--without-text', nargs='+', help='Filter units that contain any of these text segments.')
 	parser.add_argument('--with-source-document', nargs='+', help='Select only units by document codes.')
 	parser.add_argument('--without-source-document', nargs='+', help='Filter units by document codes.')
+	parser.add_argument('--verbose', action='store_true', help='Print progress updates.')
 	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'), help='Input files. May be gzipped. If not specified stdin is used.')
 
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
@@ -654,6 +669,9 @@ def main(args, stdin, stdout) -> int:
 		args = parser.parse_args(args)
 
 	fout = stdout
+
+	if args.verbose:
+		getLogger().setLevel(INFO)
 
 	# Create reader. Make sure to call make_reader immediately and not somewhere
 	# down in a nested generator so if one of the files cannot be found, we
@@ -727,8 +745,9 @@ def main(args, stdin, stdout) -> int:
 
 	# Main loop. with statement for writer so it can write header & footer
 	with writer:
-		for unit in reader:
+		for n, unit in enumerate(reader):
 			writer.write(unit)
+		info("Written %d records.", n + 1)
 
 	return 0
 
