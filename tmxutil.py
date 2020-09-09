@@ -8,9 +8,10 @@ import csv
 import sys
 import re
 import gzip
-from abc import ABC, abstractmethod
+import pickle
+from abc import ABC, ABCMeta, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
 from datetime import datetime
 from io import BufferedReader, TextIOWrapper
@@ -18,6 +19,7 @@ from itertools import combinations, chain
 from logging import warning
 from operator import itemgetter
 from pprint import pprint
+from tempfile import TemporaryFile
 from typing import Callable, Dict, List, Optional, Any, Iterator, Set, Tuple, BinaryIO, TextIO, IO, cast
 from xml.sax.saxutils import escape, quoteattr
 from xml.etree.ElementTree import iterparse
@@ -26,16 +28,19 @@ from xml.etree.ElementTree import iterparse
 if hasattr(datetime, 'fromisoformat'):
 	fromisoformat = datetime.fromisoformat
 else:
-	def fromisoformat(datestr) -> datetime:
-		match = re.match(r'^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:.(?P<hour>\d{2})(?::(?P<minute>\d{2})(?::(?P<second>\d{2}))?)?)?$', datestr)
+	def fromisoformat(date_string: str) -> datetime:
+		match = re.match(r'^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?:.(?P<hour>\d{2})(?::(?P<minute>\d{2})(?::(?P<second>\d{2}))?)?)?$', date_string)
 		if match is None:
-			raise ValueError("invalid fromisoformat value: '{}'".format(datestr))
-		return datetime(**{key: int(val) for key, val in match.groupdict(None).items() if val is not None})
+			raise ValueError("invalid fromisoformat value: '{}'".format(date_string))
+		return datetime(
+			int(match['year']), int(match['month']), int(match['day']),
+			int(match['hour']), int(match['minute']), int(match['second']))
 
 
-class BufferedBinaryIO(BinaryIO):
+class BufferedBinaryIO(BinaryIO, metaclass=ABCMeta):
+	@abstractmethod
 	def peek(self, size: int) -> bytes:
-		pass
+		...
 
 
 class XMLWriter(object):
@@ -182,7 +187,7 @@ class TMXReader(Reader):
 					yield unit
 				elif path == ['tmx', 'body', 'tu', 'prop']:
 					if element.text is None:
-						warning('Warning: empty <prop type="%s"></prop> encountered; property ignored', element.get('type'))
+						warning('empty <prop type="%s"></prop> encountered in unit with id %s in file %s; property ignored', element.get('type'), unit['id'], self.fh.name)
 					else:
 						unit[element.get('type')] = float(element.text.strip()) if 'score' in element.get('type') else element.text.strip()
 				elif path == ['tmx', 'body', 'tu', 'tuv']:
@@ -190,12 +195,12 @@ class TMXReader(Reader):
 					translations = None
 				elif path == ['tmx', 'body', 'tu', 'tuv', 'prop']:
 					if element.text is None:
-						warning('Warning: empty <prop type="%s"></prop> encountered; property ignored', element.get('type'))
+						warning('empty <prop type="%s"></prop> encountered in unit with id %s in file %s; property ignored', element.get('type'), unit['id'], self.fh.name)
 					else:
 						translation[element.get('type')].add(element.text.strip())
 				elif path == ['tmx', 'body', 'tu', 'tuv', 'seg']:
 					if element.text is None:
-						warning('Warning: empty translation segment encountered')
+						warning('empty translation segment encountered in unit with id %s in file %s', unit['id'], self.fh.name)
 						translation['text'] = ''
 					else:
 						translation['text'] = element.text.strip()
@@ -400,7 +405,7 @@ def text_key(unit: dict) -> tuple:
 	return tuple(translation['text'] for translation in unit['translations'].values())
 
 
-def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Callable[[dict, dict], bool] = lambda curr, new: False) -> Iterator[dict]:
+def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], sort_key: Callable[[dict], Any] = lambda unit: 0) -> Iterator[dict]:
 	"""
 	Deduplicate records read from reader. It does this by creating a hash table
 	of all records, grouped by key(record). If multiple records have the same
@@ -417,17 +422,48 @@ def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], compare: Cal
 		unit_id = hash(key(unit))
 
 		if unit_id in best:
-			best[unit_id] = deduplicate_merge(best[unit_id], unit, compare)
+			best[unit_id] = deduplicate_merge(best[unit_id], unit, sort_key)
 		else:
 			best[unit_id] = unit
 	
 	yield from best.values()
 
 
-def deduplicate_merge(best_unit: dict, new_unit: dict, compare: Callable[[dict, dict], bool]) -> dict:
+def deduplicate_external(reader: Iterator[dict], key: Callable[[dict], Any], sort_key: Callable[[dict], Any] = lambda unit: 0) -> Iterator[dict]:
+	best = OrderedDict() # type: dict
+
+	with TemporaryFile() as fh:
+		for unit in reader:
+			offset = fh.tell()
+
+			pickle.dump(unit, fh)
+
+			unit_id = hash(key(unit))
+
+			if unit_id in best:
+				best[unit_id].append(offset)
+			else:
+				best[unit_id] = [offset]
+
+		for duplicates in best.values():
+			best_unit = dict() # type: dict
+
+			for offset in duplicates:
+				fh.seek(offset)
+				unit = pickle.load(fh)
+
+				if not best_unit:
+					best_unit = unit
+				else:
+					best_unit = deduplicate_merge(best_unit, unit, sort_key)
+
+			yield best_unit
+
+
+def deduplicate_merge(best_unit: dict, new_unit: dict, sort_key: Callable[[dict], Any]) -> dict:
 	"""Merges new_unit into best_unit, combining collections but overwriting
 	all other entries if and only if compare(current, new) is true"""
-	new_is_better = compare(best_unit, new_unit)
+	new_is_better = sort_key(new_unit) < sort_key(best_unit)
 
 	if new_is_better:
 		for key, value in new_unit.items():
@@ -560,9 +596,7 @@ def autodetect_deduplicator(args, reader):
 	reader = chain([peeked_obj], reader)
 
 	if 'hash-bifixer' in peeked_obj and 'score-bifixer' in peeked_obj:
-		return deduplicate(reader,
-			key=itemgetter('hash-bifixer'),
-			compare=lambda best, new: best['score-bifixer'] < new['score-bifixer'])
+		return deduplicate_external(reader, key=itemgetter('hash-bifixer'), sort_key=itemgetter('score-bifixer'))
 	else:
 		return deduplicate(reader, key=text_key)
 
