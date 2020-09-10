@@ -439,7 +439,7 @@ def deduplicate(reader: Iterator[dict], key: Callable[[dict], Any], sort_key: Ca
 		else:
 			best[unit_id] = unit
 		
-			if n % 10_000 == 0:
+			if n % 10000 == 0:
 				mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 				info('best contains %d (%d processed) entries (%1.2f GB)', len(best), n, mem_usage / 10**9)
 				if mem_usage > 2 * 10**9:
@@ -468,7 +468,7 @@ def deduplicate_external(reader: Iterator[dict], key: Callable[[dict], Any], sor
 			else:
 				best[unit_id] = [offset]
 
-			if n % 10_000 == 0:
+			if n % 10000 == 0:
 				mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 				disk_usage = fh.tell()
 				info('best contains %d (%d processed) entries (mem: %1.2f GB, disk: %1.2f GB)', len(best), n, mem_usage / 10**9, disk_usage / 10**9)
@@ -487,7 +487,7 @@ def deduplicate_external(reader: Iterator[dict], key: Callable[[dict], Any], sor
 				else:
 					best_unit = deduplicate_merge(best_unit, unit, sort_key)
 
-			if n % 10_000 == 0:
+			if n % 10000 == 0:
 				info('%d out of %d built', n, len(best))
 
 			yield best_unit
