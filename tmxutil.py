@@ -767,9 +767,11 @@ def main(args, stdin, stdout) -> int:
 
 	# Main loop. with statement for writer so it can write header & footer
 	with writer:
-		for n, unit in enumerate(reader):
+		count = 0
+		for unit in reader:
 			writer.write(unit)
-		info("Written %d records.", n + 1)
+			count += 1
+		info("Written %d records.", count)
 
 	return 0
 
