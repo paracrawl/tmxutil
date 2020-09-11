@@ -706,6 +706,8 @@ def main(args, stdin, stdout) -> int:
 	# Merge all readers into a single source of sentence pairs
 	reader = chain.from_iterable(readers)
 
+	# If we want to add properties (the same ones) to all input files, we do it
+	# now, after merging all readers into one.
 	if args.properties and len(args.properties) == 1:
 		properties = parse_properties(args.properties[0])
 		reader = ({**properties, **unit} for unit in reader)
@@ -726,18 +728,18 @@ def main(args, stdin, stdout) -> int:
 	else:
 		raise ValueError('Unknown output format: {}'.format(args.output_format))
 
-	# Optional filter & annotation steps for reader
+	# Optional filter & annotation steps for reader.
+
+	# First remove bad sentence pairs, before deduplicating. We don't want the
+	# properties of bad pairs mixed in with good pairs.
+	if args.with_bicleaner_score:
+		reader = filter(lambda unit: float(unit['score-bicleaner']) >= args.with_bicleaner_score, reader)
+
 	if args.ipc_meta_files:
 		reader = map(IPCLabeler(args.ipc_meta_files).annotate, reader)
 
 	if args.ipc_group_files:
 		reader = map(IPCGroupLabeler(args.ipc_group_files).annotate, reader)
-
-	if args.with_bicleaner_score:
-		reader = filter(lambda unit: float(unit['score-bicleaner']) >= args.with_bicleaner_score, reader)
-
-	if args.deduplicate:
-		reader = autodetect_deduplicator(args, reader)
 
 	if args.with_ipc:
 		reader = filter(pred_translation_prop_intersection('ipc', set(args.with_ipc)), reader)
@@ -757,11 +759,15 @@ def main(args, stdin, stdout) -> int:
 	if args.without_source_document:
 		reader = filter(pred_negate(pred_translation_prop_intersection('source-document', set(args.without_source_document))), reader)
 
+	if args.deduplicate:
+		reader = autodetect_deduplicator(args, reader)
+
 	# If we have multiple input files, the translation unit ids will be a mess
-	# when merged. So renumber them. Otherwise keep them as is.
+	# when merged. So renumber them.
 	if len(readers) > 1 or args.renumber_output:
 		reader = starmap(partial(set_property, 'id'), enumerate(reader, start=1))
 
+	# If we want to drop properties from the output, do that as the last step.
 	if args.drop_properties:
 		reader = map(partial(del_properties, args.drop_properties), reader)
 
