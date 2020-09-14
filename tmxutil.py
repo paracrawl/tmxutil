@@ -651,7 +651,7 @@ def abort(message: str) -> int:
 	return 1
 
 
-def main(args, stdin, stdout) -> int:
+def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'], help='Input file format. Automatically detected if left unspecified.')
 	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], default='tmx', help='Output file format. Output is always written to stdout.')
@@ -678,9 +678,9 @@ def main(args, stdin, stdout) -> int:
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
 	# -p a=2 file2.tmx` etc. but that's only available since Python 3.7.
 	if hasattr(parser, 'parse_intermixed_args'):
-		args = parser.parse_intermixed_args(args)
+		args = parser.parse_intermixed_args(argv)
 	else:
-		args = parser.parse_args(args)
+		args = parser.parse_args(argv)
 
 	fout = stdout
 
@@ -701,7 +701,18 @@ def main(args, stdin, stdout) -> int:
 			             " to specify exactly one for each input file. You have {}"
 			             " --properties options, but {} files.".format(len(args.properties), len(readers)))
 		properties_per_file = (parse_properties(props) for props in args.properties)
-		readers = [({**properties, **unit} for unit in reader) for properties, reader in zip(properties_per_file, readers)]
+
+		# Note: properties is rebound in the loop so this only works if you
+		# use a generator. If you use a list comprehension this fails.
+		# https://gist.github.com/jelmervdl/61bbd577a9df379d779087f9eb15e375
+		readers = (
+			({**properties, **unit} for unit in reader)
+			for properties, reader in zip(properties_per_file, readers)
+		) 
+		
+		# If we have multiple input files, the translation unit ids will be a mess
+		# when merged. So renumber them.
+		args.renumber_output = True
 
 	# Merge all readers into a single source of sentence pairs
 	reader = chain.from_iterable(readers)
@@ -762,9 +773,7 @@ def main(args, stdin, stdout) -> int:
 	if args.deduplicate:
 		reader = autodetect_deduplicator(args, reader)
 
-	# If we have multiple input files, the translation unit ids will be a mess
-	# when merged. So renumber them.
-	if len(readers) > 1 or args.renumber_output:
+	if args.renumber_output:
 		reader = starmap(partial(set_property, 'id'), enumerate(reader, start=1))
 
 	# If we want to drop properties from the output, do that as the last step.
