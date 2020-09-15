@@ -749,6 +749,7 @@ def properties_adder(properties: Dict[str,str], reader: Iterator[TranslationUnit
 		unit.update(properties)
 		yield unit
 
+
 def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'], help='Input file format. Automatically detected if left unspecified.')

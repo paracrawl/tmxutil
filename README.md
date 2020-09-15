@@ -75,12 +75,10 @@ cat DE-EN-2001-Abstract-aligned.tsv \
 	- When using `txt`, you'll have to select which language you want the plain text for, i.e. `--output-languages en`.
 - `-l L1 L2, --input-languages L1 L2`. Languages & order of them in the input file. Only necessary when reading `tab` files.
 - `--ouput-languages L1 [L2]` language or order of languages in the output file. Not used if `tmx` is the output.
-- `-d, --deduplicate` groups sentence pairs with the same text together.
+- `-d, --deduplicate` groups sentence pairs with the same text or hash together.
+- `--drop PROP [PROP ...]` drop properties from the sentence pairs while writing output.
+- `--renumber-output` causes all translation unit ids to be reset. Enabled by default when multiple input files are given.
 - `--ipc FILE` adds IPC metadata to each sentence pair.
-- `--ipc-group FILE` adds IPC group metadata to each sentence pair.
-- `--with-ipc IPC1 [IPC2 ...]` filter by IPCs. If multiple IPC codes are given, it will treat them as IPC1 *or* IPC2 etc.
-- `--with-ipc-group PREFIX1 [PREFIX2 ...]` filter by IPC group, i.e. metadata added using the `--ipc-group` option.
-- `--with-text STR1 [STR2 ...]` filter by text. It will search in both sides of the sentence pairs.
-- `--without-text STR1 [STR2 ...]` excludes sentence pairs matching any of the strings.
-- `--with-source-document ID1 [ID2 ...]` filter by document id.
-- `--without-source-document ID1 [ID2 ...]` excludes certain documents.
+- `--with PROP=VALUE [PROP=VALUE ...]` filters sentence pairs on their text or properties. Supported operators are `=`, `>`, `<`, `>=`, `<=` and `=~` for regular expressions. Use multiple `PROP=VALUE` pairs in a `--with` option to combine the conditions (i.e. AND). Or use multiple `--with` options for separate conditions (i.e. OR).
+- `--without PROP=VALUE [PROP=VALUE ...]` same as `--with`, but negated, for excluding instead of including sentence pairs. 
+- `--verbose` enabled progress updates.
