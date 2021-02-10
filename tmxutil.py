@@ -605,7 +605,7 @@ def build_regex_condition(lhs: str, rhs: str) -> Callable[[TranslationUnit], boo
 condition_operators = {
 	 '<': build_binary_condition(float, operator.lt),
 	 '>': build_binary_condition(float, operator.gt),
-	'>=': build_binary_condition(float, operator.le),
+	'<=': build_binary_condition(float, operator.le),
 	'>=': build_binary_condition(float, operator.ge),
 	 '=': build_eq_condition,
 	'=~': build_regex_condition
