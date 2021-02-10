@@ -653,7 +653,7 @@ def is_gzipped(fh: BufferedBinaryIO) -> bool:
 	return fh.peek(2).startswith(b'\x1f\x8b')
 
 
-def make_reader(fh: BufferedBinaryIO, args: Namespace) -> Iterator[TranslationUnit]:
+def make_reader(fh: BufferedBinaryIO, args: Namespace = Namespace(input_format=None, input_columns=None, input_languages=None)) -> Iterator[TranslationUnit]:
 	if is_gzipped(fh):
 		fh = cast(BufferedBinaryIO, gzip.open(fh))
 
