@@ -402,9 +402,12 @@ class IPCLabeler(object):
 
 	def annotate(self, unit: TranslationUnit) -> TranslationUnit:
 		for lang, translation in unit.translations.items():
-			keys = self.lut.keys() & {(lang.lower(), url) for url in translation['source-document']}
 			# Ignoring type because https://github.com/python/mypy/issues/2013
-			translation['ipc'] = set().union(*(self.lut[key] for key in keys)) # type: ignore
+			translation['ipc'] = set().union(*(
+				self.lut[(lang.lower(), url)]
+				for url in translation['source-document']
+				if (lang.lower(), url) in self.lut
+			)) # type: ignore
 		return unit
 
 
