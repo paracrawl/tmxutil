@@ -40,6 +40,16 @@ else:
 			int(match['hour']), int(match['minute']), int(match['second']))
 
 
+def fromfilesize(size_string: str) -> int:
+	order = 1
+	for suffix in ['B', 'K', 'M', 'G', 'T']:
+		if size_string.endswith(suffix):
+			return int(size_string[:-1]) * order
+		else:
+			order *= 1000
+	return int(size_string)
+
+
 class TranslationUnitVariant(Dict[str, Set[str]]):
 	__slots__ = ['text']
 
@@ -448,7 +458,7 @@ def text_key(unit: TranslationUnit) -> Tuple[str,...]:
 	return tuple(translation.text for translation in unit.translations.values())
 
 
-def deduplicate(reader: Iterator[TranslationUnit], key: Callable[[TranslationUnit], Any], sort_key: Callable[[TranslationUnit], Any] = lambda unit: 0) -> Iterator[TranslationUnit]:
+def deduplicate(reader: Iterator[TranslationUnit], key: Callable[[TranslationUnit], Any], sort_key: Callable[[TranslationUnit], Any] = lambda unit: 0, mem_limit:int = 2 * 10**9) -> Iterator[TranslationUnit]:
 	"""
 	Deduplicate records read from reader. It does this by creating a hash table
 	of all records, grouped by key(record). If multiple records have the same
@@ -481,7 +491,7 @@ def deduplicate(reader: Iterator[TranslationUnit], key: Callable[[TranslationUni
 			if n % 10000 == 0:
 				mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 				info('best contains %d (%d processed) entries (%1.2f GB)', len(best), n, mem_usage / 10**9)
-				if mem_usage > 2 * 10**9:
+				if mem_usage > mem_limit:
 					info("Exceeded in-memory size limit, switching to file-backed deduplication")
 					already_processed = best.values()
 					del best
@@ -719,7 +729,7 @@ def autodetect(fh: BufferedBinaryIO) -> Tuple[str, Dict[str,Any]]:
 	raise ValueError('Did not recognize file format')
 
 
-def make_deduplicator(args: Namespace, reader: Iterator[TranslationUnit]) -> Iterator[TranslationUnit]:
+def make_deduplicator(args: Namespace, reader: Iterator[TranslationUnit], mem_limit=2 * 10**9) -> Iterator[TranslationUnit]:
 	"""
 	Make a deduplicate filter based on the input options. Fancy bifixer based
 	deduplicator if we have the data, otherwise fall back to boring deduplicator.
@@ -736,9 +746,9 @@ def make_deduplicator(args: Namespace, reader: Iterator[TranslationUnit]) -> Ite
 	reader = chain([peeked_obj], reader)
 
 	if 'hash-bifixer' in peeked_obj and 'score-bifixer' in peeked_obj:
-		return deduplicate(reader, key=operator.itemgetter('hash-bifixer'), sort_key=operator.itemgetter('score-bifixer'))
+		return deduplicate(reader, key=operator.itemgetter('hash-bifixer'), sort_key=operator.itemgetter('score-bifixer'), mem_limit=mem_limit)
 	else:
-		return deduplicate(reader, key=text_key)
+		return deduplicate(reader, key=text_key, mem_limit=mem_limit)
 
 
 def abort(message: str) -> int:
@@ -770,6 +780,7 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser.add_argument('--with', nargs='+', action='append', dest='filter_with')
 	parser.add_argument('--without', nargs='+', action='append', dest='filter_without')
 	parser.add_argument('--verbose', action='store_true', help='Print progress updates.')
+	parser.add_argument('--workspace', type=fromfilesize, help='Mamimum memory usage for deduplication. When exceeded, will continue deduplication using filesystem.', default='4G')
 	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'), help='Input files. May be gzipped. If not specified stdin is used.')
 
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
@@ -847,7 +858,7 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 		reader = filter(lambda unit: all(any(not expr(unit) for expr in cond) for cond in dnf), reader)
 
 	if args.deduplicate:
-		reader = make_deduplicator(args, reader)
+		reader = make_deduplicator(args, reader, mem_limit=args.workspace)
 
 	if args.renumber_output:
 		reader = starmap(partial(set_property, 'id'), enumerate(reader, start=1))
