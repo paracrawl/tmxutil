@@ -66,7 +66,7 @@ class TranslationUnitVariant(Dict[str, Set[str]]):
 				self[key] = value
 
 
-class TranslationUnit(Dict[str,Union[float, str,Set[str]]]):
+class TranslationUnit(Dict[str,Union[float, str, Set[str]]]):
 	__slots__ = ['translations']
 
 	def __init__(self, *, translations: Optional[Dict[str, TranslationUnitVariant]] = None, **kwargs: Union[float, str, Set[str]]):
@@ -118,14 +118,15 @@ class XMLWriter(object):
 	def write(self, text: Any) -> None:
 		self.fh.write(escape(str(text).rstrip()))
 
-	@contextmanager
-	def element(self, name: str, attributes: Dict[str,Any] = dict()) -> Generator['XMLWriter',None,None]:
-		"""Context wrapper that automatically closes element once you leave
-		the context."""
-		
-		self.open(name, attributes)
-		yield self
-		self.close()
+	def element(self, name: str, attributes: Dict[str,Any] = dict(), text: str = None) -> None:
+		self.fh.write('\n{indent}<{name}{attr}>{text}</{name}>'.format(
+			indent=self.indent * len(self.stack),
+			name=name,
+			text=escape(str(text).rstrip()),
+			attr=' '.join(
+				' {}={}'.format(attr_name, quoteattr(str(attr_value)))
+				for attr_name, attr_value in attributes.items()
+			)))
 
 	def __enter__(self) -> 'XMLWriter':
 		self.fh.write('<?xml version=\"1.0\"?>')
@@ -269,8 +270,7 @@ class TMXWriter(Writer):
 		if self.creation_date is not None:
 			args['creationdate'] = self.creation_date.strftime("%Y%m%dT%H%M%S")
 
-		with self.writer.element('header', args) as header:
-			pass # Immediately close <header> again.
+		self.writer.element('header', args) # <header/>
 		
 		self.writer.open('body')
 		return self
@@ -285,20 +285,20 @@ class TMXWriter(Writer):
 			for val in sorted(value):
 				self._write_prop(name, val)
 		else:
-			with self.writer.element('prop', {'type': name}) as prop:
-				prop.write(value)
+			self.writer.element('prop', {'type': name}, value)
 
 	def write(self, unit: TranslationUnit) -> None:
-		with self.writer.element('tu', {'tuid': unit['id'], 'datatype': 'Text'}):
-			for key, value in sorted(unit.items()):
-				if key != 'id':
-					self._write_prop(key, value)
-			for lang, translation in sorted(unit.translations.items()):
-				with self.writer.element('tuv', {'xml:lang': lang}):
-					for key, value in sorted(translation.items()):
-						self._write_prop(key, value)
-					with self.writer.element('seg'):
-						self.writer.write(translation.text)
+		self.writer.open('tu', {'tuid': unit['id'], 'datatype': 'Text'}) # <tu>
+		for key, value in sorted(unit.items()):
+			if key != 'id':
+				self._write_prop(key, value) # <prop/>
+		for lang, translation in sorted(unit.translations.items()):
+			self.writer.open('tuv', {'xml:lang': lang}) # <tuv>
+			for key, value in sorted(translation.items()):
+				self._write_prop(key, value) # <prop/>
+			self.writer.element('seg', text=translation.text) # <seg>..</seg>
+			self.writer.close() # </tuv>
+		self.writer.close() # </tu>
 
 
 class TabReader(Reader):
