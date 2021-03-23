@@ -66,10 +66,10 @@ class TranslationUnitVariant(Dict[str, Set[str]]):
 				self[key] = value
 
 
-class TranslationUnit(Dict[str,Union[float, str, Set[str]]]):
+class TranslationUnit(Dict[str,Set[str]]):
 	__slots__ = ['translations']
 
-	def __init__(self, *, translations: Optional[Dict[str, TranslationUnitVariant]] = None, **kwargs: Union[float, str, Set[str]]):
+	def __init__(self, *, translations: Optional[Dict[str, TranslationUnitVariant]] = None, **kwargs: Set[str]):
 		super().__init__(**kwargs)
 		self.translations = translations or dict() # type: Dict[str,TranslationUnitVariant]
 
@@ -118,7 +118,7 @@ class XMLWriter(object):
 	def write(self, text: Any) -> None:
 		self.fh.write(escape(str(text).rstrip()))
 
-	def element(self, name: str, attributes: Dict[str,Any] = dict(), text: str = None) -> None:
+	def element(self, name: str, attributes: Dict[str,Any] = dict(), text: Optional[str] = None) -> None:
 		# Notify the parent element it has children (for formatting)
 		if self.stack:
 			self.stack[-1] = (self.stack[-1][0], True)
@@ -220,7 +220,7 @@ class TMXReader(Reader):
 				enter(element)
 
 				if path == ['tmx', 'body', 'tu']:
-					unit = TranslationUnit(id=element.get('tuid'))
+					unit = TranslationUnit(id={element.get('tuid')})
 				elif path == ['tmx', 'body', 'tu', 'tuv']:
 					translation = TranslationUnitVariant()
 			elif event == 'end':
@@ -228,23 +228,20 @@ class TMXReader(Reader):
 					yield unit
 				elif path == ['tmx', 'body', 'tu', 'prop']:
 					if element.text is None:
-						warning('empty <prop type="%s"></prop> encountered in unit with id %s in file %s; property ignored', element.get('type'), unit['id'], self.fh.name)
+						warning('empty <prop type="%s"></prop> encountered in unit with id %s in file %s; property ignored', element.get('type'), first(unit['id']), self.fh.name)
 					else:
-						unit[element.get('type')] = float(element.text.strip()) if 'score' in element.get('type') else element.text.strip()
+						unit.setdefault(element.get('type'), set()).add(element.text.strip())
 				elif path == ['tmx', 'body', 'tu', 'tuv']:
 					unit.translations[element.attrib[lang_key]] = translation
 					translations = None
 				elif path == ['tmx', 'body', 'tu', 'tuv', 'prop']:
 					if element.text is None:
-						warning('empty <prop type="%s"></prop> encountered in unit with id %s in file %s; property ignored', element.get('type'), unit['id'], self.fh.name)
+						warning('empty <prop type="%s"></prop> encountered in unit with id %s in file %s; property ignored', element.get('type'), first(unit['id']), self.fh.name)
 					else:
-						if element.get('type') in translation:
-							translation[element.get('type')].add(element.text.strip())
-						else:
-							translation[element.get('type')] = {element.text.strip()}
+						translation.setdefault(element.get('type'), set()).add(element.text.strip())
 				elif path == ['tmx', 'body', 'tu', 'tuv', 'seg']:
 					if element.text is None:
-						warning('empty translation segment encountered in unit with id %s in file %s', unit['id'], self.fh.name)
+						warning('empty translation segment encountered in unit with id %s in file %s', first(unit['id']), self.fh.name)
 						translation.text = ''
 					else:
 						translation.text = element.text.strip()
@@ -282,24 +279,19 @@ class TMXWriter(Writer):
 	def __exit__(self, type: Optional[Type[BaseException]], value: Optional[BaseException], traceback: Optional[TracebackType]) -> None:
 		self.writer.__exit__(type, value, traceback)
 
-	def _write_prop(self, name: str, value: Union[str,float,Set[str]]) -> None:
-		if value is None:
-			return
-		elif isinstance(value, set):
-			for val in sorted(value):
-				self._write_prop(name, val)
-		else:
-			self.writer.element('prop', {'type': name}, value)
+	def _write_prop(self, name: str, value: Set[str]) -> None:
+		for val in sorted(value):
+			self.writer.element('prop', {'type': name}, val)
 
 	def write(self, unit: TranslationUnit) -> None:
-		self.writer.open('tu', {'tuid': unit['id'], 'datatype': 'Text'}) # <tu>
+		self.writer.open('tu', {'tuid': first(unit['id']), 'datatype': 'Text'}) # <tu>
 		for key, value in sorted(unit.items()):
 			if key != 'id':
-				self._write_prop(key, value) # <prop/>
+				self._write_prop(key, value) # <prop/> * m
 		for lang, translation in sorted(unit.translations.items()):
-			self.writer.open('tuv', {'xml:lang': lang}) # <tuv>
+			self.writer.open('tuv', {'xml:lang': lang}) # <tuv> * 2
 			for key, value in sorted(translation.items()):
-				self._write_prop(key, value) # <prop/>
+				self._write_prop(key, value) # <prop/> * n
 			self.writer.element('seg', text=translation.text) # <seg>..</seg>
 			self.writer.close() # </tuv>
 		self.writer.close() # </tu>
@@ -326,7 +318,7 @@ class TabReader(Reader):
 
 			values = line.split('\t')
 
-			record = TranslationUnit(id=str(n))
+			record = TranslationUnit(id={str(n)})
 
 			var1 = Variant(self.src_lang)
 
@@ -346,7 +338,7 @@ class TabReader(Reader):
 					else:
 						variant.unit[column[:-2]] = {value}
 				else:
-					record[column] = value
+					record.setdefault(column, set()).add(value)
 
 			record.translations = {
 				var1.lang: var1.unit,
@@ -516,10 +508,7 @@ def deduplicate_external(reader: Iterator[TranslationUnit], key: Callable[[Trans
 
 			unit_id = hash(key(unit))
 
-			if unit_id in best:
-				best[unit_id].append(offset)
-			else:
-				best[unit_id] = [offset]
+			best.setdefault(unit_id, []).append(offset)
 
 			if n % 10000 == 0:
 				mem_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -562,7 +551,7 @@ def deduplicate_merge(best_unit: TranslationUnit, new_unit: TranslationUnit, sor
 
 
 
-def translation_unit_test_prop(lhs: str, test: Callable[[Union[str,float,Set[str]]], bool], unit: TranslationUnit) -> bool:
+def translation_unit_test_prop(lhs: str, test: Callable[[Set[str]], bool], unit: TranslationUnit) -> bool:
 	"""Tests a translation unit property, whether it is inside a translation
 	or a unit level property."""
 	if lhs in unit:
@@ -570,7 +559,7 @@ def translation_unit_test_prop(lhs: str, test: Callable[[Union[str,float,Set[str
 
 	for lang, translation_unit in unit.translations.items():
 		if lhs == 'text':
-			return test(translation_unit.text)
+			return test({translation_unit.text})
 		elif lhs in translation_unit:
 			if test(translation_unit[lhs]):
 				return True
@@ -584,11 +573,8 @@ def build_binary_condition(type: Type[T], op: Callable[[T,T], bool]) -> Callable
 	"""Wrapper for standard python operations on types. I.e. to implement gt
 	and lt."""
 	def build_condition(lhs: str, rhs: str) -> Callable[[TranslationUnit], bool]:
-		def test(val: Union[float,str,Set[str]]) -> bool:
-			if isinstance(val, set):
-				return any(op(type(el), type(rhs)) for el in val)
-			else:
-				return op(type(val), type(rhs))
+		def test(val: Set[str]) -> bool:
+			return any(op(type(el), type(rhs)) for el in val)
 		return partial(translation_unit_test_prop, lhs, test)
 	return build_condition
 
@@ -596,12 +582,8 @@ def build_binary_condition(type: Type[T], op: Callable[[T,T], bool]) -> Callable
 def build_eq_condition(lhs: str, rhs: str) -> Callable[[TranslationUnit], bool]:
 	"""Specialised version of build_binary_condition that uses 'in' for set
 	tests instead of iterating over all elements in the set."""
-	def test(val: Union[float,str,Set[str]]) -> bool:
-		if isinstance(val, set):
-			return rhs in val
-		else:
-			return rhs == str(val)
-
+	def test(val: Set[str]) -> bool:
+		return rhs in val
 	return partial(translation_unit_test_prop, lhs, test)
 
 
@@ -609,13 +591,8 @@ def build_regex_condition(lhs: str, rhs: str) -> Callable[[TranslationUnit], boo
 	"""Specialised version (or wrapper around) build_binary_condition that makes
 	one that tests a regular expression."""
 	pattern = re.compile(rhs)
-
-	def test(val: Union[float,str,Set[str]]) -> bool:
-		if isinstance(val, set):
-			return any(pattern.search(el) is not None for el in val)
-		else:
-			return pattern.search(str(val)) is not None
-
+	def test(val: Set[str]) -> bool:
+		return any(pattern.search(el) is not None for el in val)
 	return partial(translation_unit_test_prop, lhs, test)
 
 
@@ -629,8 +606,8 @@ condition_operators = {
 }
 
 
-def set_property(key: str, value: Any, unit: TranslationUnit) -> TranslationUnit:
-	unit[key] = value
+def set_property(key: str, value: str, unit: TranslationUnit) -> TranslationUnit:
+	unit[key] = {value}
 	return unit
 
 
@@ -640,8 +617,12 @@ def del_properties(properties: List[str], unit: TranslationUnit) -> TranslationU
 	return unit
 
 
-def parse_properties(props: str) -> Dict[str,str]:
-	return dict(cast(Tuple[str,str], prop.split('=', 1)) for prop in props.split(','))
+def parse_properties(props: str) -> Dict[str,Set[str]]:
+	properties: Dict[str,Set[str]] = {}
+	for prop in props.split(','):
+		key, value = prop.split('=', 1)
+		properties.setdefault(key, set()).add(value)
+	return properties
 
 
 def parse_condition(operators: Dict[str,Callable[[str,str], Callable[[TranslationUnit], bool]]], expr: str) -> Callable[[TranslationUnit], bool]:
@@ -733,7 +714,16 @@ def autodetect(fh: BufferedBinaryIO) -> Tuple[str, Dict[str,Any]]:
 	raise ValueError('Did not recognize file format')
 
 
-def make_deduplicator(args: Namespace, reader: Iterator[TranslationUnit], mem_limit=2 * 10**9) -> Iterator[TranslationUnit]:
+def first_item_getter(key: str) -> Callable[[TranslationUnit], Optional[str]]:
+	"""Creates a getter that gets one value from a translation unit's properties,
+	if there are more values for that property, it's undefined which one it gets.
+	If the property does not exist, or is empty, it will return None."""
+	def getter(obj: TranslationUnit) -> Optional[str]:
+		return first(obj.get(key, set()), default=None)
+	return getter
+
+
+def make_deduplicator(args: Namespace, reader: Iterator[TranslationUnit], mem_limit : int = 2 * 10**9) -> Iterator[TranslationUnit]:
 	"""
 	Make a deduplicate filter based on the input options. Fancy bifixer based
 	deduplicator if we have the data, otherwise fall back to boring deduplicator.
@@ -750,7 +740,7 @@ def make_deduplicator(args: Namespace, reader: Iterator[TranslationUnit], mem_li
 	reader = chain([peeked_obj], reader)
 
 	if 'hash-bifixer' in peeked_obj and 'score-bifixer' in peeked_obj:
-		return deduplicate(reader, key=operator.itemgetter('hash-bifixer'), sort_key=operator.itemgetter('score-bifixer'), mem_limit=mem_limit)
+		return deduplicate(reader, key=first_item_getter('hash-bifixer'), sort_key=first_item_getter('score-bifixer'), mem_limit=mem_limit)
 	else:
 		return deduplicate(reader, key=text_key, mem_limit=mem_limit)
 
@@ -761,7 +751,7 @@ def abort(message: str) -> int:
 	return 1
 
 
-def properties_adder(properties: Dict[str,str], reader: Iterator[TranslationUnit]) -> Iterator[TranslationUnit]:
+def properties_adder(properties: Dict[str,Set[str]], reader: Iterator[TranslationUnit]) -> Iterator[TranslationUnit]:
 	for unit in reader:
 		unit.update(properties)
 		yield unit
