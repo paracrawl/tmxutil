@@ -119,11 +119,15 @@ class XMLWriter(object):
 		self.fh.write(escape(str(text).rstrip()))
 
 	def element(self, name: str, attributes: Dict[str,Any] = dict(), text: str = None) -> None:
+		# Notify the parent element it has children (for formatting)
+		if self.stack:
+			self.stack[-1] = (self.stack[-1][0], True)
+
 		self.fh.write('\n{indent}<{name}{attr}>{text}</{name}>'.format(
 			indent=self.indent * len(self.stack),
 			name=name,
-			text=escape(str(text).rstrip()),
-			attr=' '.join(
+			text=escape(str(text).rstrip()) if text is not None else '',
+			attr=''.join(
 				' {}={}'.format(attr_name, quoteattr(str(attr_value)))
 				for attr_name, attr_value in attributes.items()
 			)))
