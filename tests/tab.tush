@@ -56,3 +56,26 @@ $ ../tmxutil.py --creation-date 2020-01-01 -l l1 l2 < text.tab
 |   </body>
 | </tmx>
 ```
+
+Converting to tabbed output without any additional parameters should just export the two source document and two sentences by default.
+```sh
+$ echo '<?xml version="1.0"?>\n' \
+ '<tmx version="1.4">\n' \
+ '  <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>\n' \
+ '  <body>\n' \
+ '    <tu tuid="0" datatype="Text">\n' \
+ '      <prop type="score-aligner">1.0</prop>\n' \
+ '      <tuv xml:lang="l1">\n' \
+ '        <prop type="source-document">ID 1</prop>\n' \
+ '        <seg>Sentence 1</seg>\n' \
+ '      </tuv>\n' \
+ '      <tuv xml:lang="l2">\n' \
+ '        <prop type="source-document">ID 2</prop>\n' \
+ '        <seg>Sentence 2</seg>\n' \
+ '      </tuv>\n' \
+ '    </tu>\n' \
+ '  </body>\n' \
+ '</tmx>\n' | ../tmxutil.py -o tab
+| ID 1	ID 2	Sentence 1	Sentence 2
+```
+

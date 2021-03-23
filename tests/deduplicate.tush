@@ -1,0 +1,147 @@
+Deduplicating when hash-bifixer and score-bifixer are available should take
+those into account. It should merge the source documents properties from the
+merged documents. When using hash-bifixer, it should not look at the text.
+
+```sh
+$ echo '<?xml version="1.0"?>\n' \
+ '<tmx version="1.4">\n' \
+ '  <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>\n' \
+ '  <body>\n' \
+ '    <tu tuid="0" datatype="Text">\n' \
+ '      <prop type="hash-bifixer">0xSAMEHASH</prop>\n' \
+ '      <prop type="score-bifixer">2.0</prop>\n' \
+ '      <tuv xml:lang="l1">\n' \
+ '        <prop type="source-document">ID 1</prop>\n' \
+ '        <seg>Sentence 1a</seg>\n' \
+ '      </tuv>\n' \
+ '      <tuv xml:lang="l2">\n' \
+ '        <prop type="source-document">ID 2</prop>\n' \
+ '        <seg>Sentence 2a</seg>\n' \
+ '      </tuv>\n' \
+ '    </tu>\n' \
+ '    <tu tuid="1" datatype="Text">\n' \
+ '      <prop type="hash-bifixer">0xSAMEHASH</prop>\n' \
+ '      <prop type="score-bifixer">1.0</prop>\n' \
+ '      <tuv xml:lang="l1">\n' \
+ '        <prop type="source-document">ID 3</prop>\n' \
+ '        <seg>Sentence 1b</seg>\n' \
+ '      </tuv>\n' \
+ '      <tuv xml:lang="l2">\n' \
+ '        <prop type="source-document">ID 4</prop>\n' \
+ '        <seg>Sentence 2b</seg>\n' \
+ '      </tuv>\n' \
+ '    </tu>\n' \
+ '    <tu tuid="2" datatype="Text">\n' \
+ '      <prop type="hash-bifixer">0xDIFFERENT</prop>\n' \
+ '      <prop type="score-bifixer">1.0</prop>\n' \
+ '      <tuv xml:lang="l1">\n' \
+ '        <prop type="source-document">ID 5</prop>\n' \
+ '        <seg>Sentence 1b</seg>\n' \
+ '      </tuv>\n' \
+ '      <tuv xml:lang="l2">\n' \
+ '        <prop type="source-document">ID 6</prop>\n' \
+ '        <seg>Sentence 2b</seg>\n' \
+ '      </tuv>\n' \
+ '    </tu>\n' \
+ '  </body>\n' \
+ '</tmx>\n' | ../tmxutil.py --creation-date 2020-01-01 --deduplicate
+| <?xml version="1.0"?>
+| <tmx version="1.4">
+|   <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>
+|   <body>
+|     <tu tuid="1" datatype="Text">
+|       <prop type="hash-bifixer">0xSAMEHASH</prop>
+|       <prop type="score-bifixer">1.0</prop>
+|       <tuv xml:lang="l1">
+|         <prop type="source-document">ID 1</prop>
+|         <prop type="source-document">ID 3</prop>
+|         <seg>Sentence 1b</seg>
+|       </tuv>
+|       <tuv xml:lang="l2">
+|         <prop type="source-document">ID 2</prop>
+|         <prop type="source-document">ID 4</prop>
+|         <seg>Sentence 2b</seg>
+|       </tuv>
+|     </tu>
+|     <tu tuid="2" datatype="Text">
+|       <prop type="hash-bifixer">0xDIFFERENT</prop>
+|       <prop type="score-bifixer">1.0</prop>
+|       <tuv xml:lang="l1">
+|         <prop type="source-document">ID 5</prop>
+|         <seg>Sentence 1b</seg>
+|       </tuv>
+|       <tuv xml:lang="l2">
+|         <prop type="source-document">ID 6</prop>
+|         <seg>Sentence 2b</seg>
+|       </tuv>
+|     </tu>
+|   </body>
+| </tmx>
+```
+
+If there is no hash-bifixer, it should deduplicate based on the sentence text.
+$ echo '<?xml version="1.0"?>\n' \
+ '<tmx version="1.4">\n' \
+ '  <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>\n' \
+ '  <body>\n' \
+ '    <tu tuid="0" datatype="Text">\n' \
+ '      <tuv xml:lang="l1">\n' \
+ '        <prop type="source-document">ID 1</prop>\n' \
+ '        <seg>Sentence 1a</seg>\n' \
+ '      </tuv>\n' \
+ '      <tuv xml:lang="l2">\n' \
+ '        <prop type="source-document">ID 2</prop>\n' \
+ '        <seg>Sentence 2a</seg>\n' \
+ '      </tuv>\n' \
+ '    </tu>\n' \
+ '    <tu tuid="1" datatype="Text">\n' \
+ '      <tuv xml:lang="l1">\n' \
+ '        <prop type="source-document">ID 3</prop>\n' \
+ '        <seg>Sentence 1b</seg>\n' \
+ '      </tuv>\n' \
+ '      <tuv xml:lang="l2">\n' \
+ '        <prop type="source-document">ID 4</prop>\n' \
+ '        <seg>Sentence 2b</seg>\n' \
+ '      </tuv>\n' \
+ '    </tu>\n' \
+ '    <tu tuid="2" datatype="Text">\n' \
+ '      <tuv xml:lang="l1">\n' \
+ '        <prop type="source-document">ID 5</prop>\n' \
+ '        <seg>Sentence 1b</seg>\n' \
+ '      </tuv>\n' \
+ '      <tuv xml:lang="l2">\n' \
+ '        <prop type="source-document">ID 6</prop>\n' \
+ '        <seg>Sentence 2b</seg>\n' \
+ '      </tuv>\n' \
+ '    </tu>\n' \
+ '  </body>\n' \
+ '</tmx>\n' | ../tmxutil.py --creation-date 2020-01-01 --deduplicate
+| <?xml version="1.0"?>
+| <tmx version="1.4">
+|   <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>
+|   <body>
+|     <tu tuid="0" datatype="Text">
+|       <tuv xml:lang="l1">
+|         <prop type="source-document">ID 1</prop>
+|         <seg>Sentence 1a</seg>
+|       </tuv>
+|       <tuv xml:lang="l2">
+|         <prop type="source-document">ID 2</prop>
+|         <seg>Sentence 2a</seg>
+|       </tuv>
+|     </tu>
+|     <tu tuid="1" datatype="Text">
+|       <tuv xml:lang="l1">
+|         <prop type="source-document">ID 3</prop>
+|         <prop type="source-document">ID 5</prop>
+|         <seg>Sentence 1b</seg>
+|       </tuv>
+|       <tuv xml:lang="l2">
+|         <prop type="source-document">ID 4</prop>
+|         <prop type="source-document">ID 6</prop>
+|         <seg>Sentence 2b</seg>
+|       </tuv>
+|     </tu>
+|   </body>
+| </tmx>
+```
