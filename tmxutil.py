@@ -82,18 +82,13 @@ class BufferedBinaryIO(BinaryIO, metaclass=ABCMeta):
 		...
 
 
-class ProxyObject:
-	def __init__(self, fh):
-		self.fh = fh
-
-	def __getattr__(self, attr):
-		return getattr(self.fh, attr)
-
-
 try:
 	from tqdm import tqdm
 
-	class ProgressWrapper(ProxyObject):
+	class ProgressWrapper:
+		"""Wraps around a file-like object and shows a progress bar as to how much
+		of it has been read."""
+
 		def __init__(self, fh):
 			self.fh = fh
 			self.tqdm = tqdm(
@@ -103,6 +98,9 @@ try:
 				file=sys.stderr,
 				unit='b',
 				unit_scale=True)
+
+		def __getattr__(self, attr):
+			return getattr(self.fh, attr)
 
 		def read(self, size=-1):
 			data = self.fh.read(size)
@@ -115,12 +113,13 @@ try:
 			return data
 
 		def close(self):
-			self.fh.close()
 			self.tqdm.close()
+			self.fh.close()
 
 except ImportError:
-	class ProgressWrapper(ProxyObject):
-		pass		
+	# no-op for when tqdm is not available
+	def ProgressWrapper(fh):
+		return fh
 
 
 class XMLWriter(object):
