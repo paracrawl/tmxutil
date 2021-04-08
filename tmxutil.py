@@ -444,7 +444,7 @@ class CountWriter(Writer):
 	def __exit__(self, type: Optional[Type[BaseException]], value: Optional[BaseException], traceback: Optional[TracebackType]) -> None:
 		if type is None:
 			for key, count in sorted(self.counter.most_common(), key=itemgetter(1), reverse=True):
-				self.fh.write("{}\t{}\n".format(count, " ".join(key) if isinstance(key, frozenset) else key))
+				self.fh.write("{}\t{}\n".format(count, " ".join(sorted(key)) if isinstance(key, frozenset) else key))
 
 	def write(self, unit: TranslationUnit) -> None:
 		self.counter.update(self.key(unit))
