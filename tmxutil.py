@@ -6,6 +6,7 @@ __VERSION__ = 1.1
 
 import csv
 import sys
+import os
 import re
 import gzip
 import pickle
@@ -79,6 +80,47 @@ class BufferedBinaryIO(BinaryIO, metaclass=ABCMeta):
 	@abstractmethod
 	def peek(self, size: int) -> bytes:
 		...
+
+
+class ProxyObject:
+	def __init__(self, fh):
+		self.fh = fh
+
+	def __getattr__(self, attr):
+		return getattr(self.fh, attr)
+
+
+try:
+	from tqdm import tqdm
+
+	class ProgressWrapper(ProxyObject):
+		def __init__(self, fh):
+			self.fh = fh
+			self.tqdm = tqdm(
+				desc=fh.name,
+				total=os.fstat(fh.fileno()).st_size,
+				initial=fh.seekable() and fh.tell(),
+				file=sys.stderr,
+				unit='b',
+				unit_scale=True)
+
+		def read(self, size=-1):
+			data = self.fh.read(size)
+			self.tqdm.update(len(data))
+			return data
+
+		def read1(self, size=-1):
+			data = self.fh.read1(size)
+			self.tqdm.update(len(data))
+			return data
+
+		def close(self):
+			self.fh.close()
+			self.tqdm.close()
+
+except ImportError:
+	class ProgressWrapper(ProxyObject):
+		pass		
 
 
 class XMLWriter(object):
@@ -670,7 +712,10 @@ def is_gzipped(fh: BufferedBinaryIO) -> bool:
 	return fh.peek(2).startswith(b'\x1f\x8b')
 
 
-def make_reader(fh: BufferedBinaryIO, args: Namespace = Namespace(input_format=None, input_columns=None, input_languages=None)) -> Iterator[TranslationUnit]:
+def make_reader(fh: BufferedBinaryIO, args: Namespace = Namespace(input_format=None, input_columns=None, input_languages=None, progress=False)) -> Iterator[TranslationUnit]:
+	if args.progress:
+		fh = ProgressWrapper(fh)
+
 	if is_gzipped(fh):
 		fh = cast(BufferedBinaryIO, gzip.open(fh))
 
@@ -805,6 +850,8 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser.add_argument('--without', nargs='+', action='append', dest='filter_without')
 	parser.add_argument('--verbose', action='store_true', help='Print progress updates.')
 	parser.add_argument('--workspace', type=fromfilesize, help='Mamimum memory usage for deduplication. When exceeded, will continue deduplication using filesystem.', default='4G')
+	parser.add_argument('--count', type=parse_count_property, dest='count_property')
+	parser.add_argument('-P', '--progress', action='store_true', help='Show progress bar when reading files (if possible)')
 	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'), help='Input files. May be gzipped. If not specified stdin is used.')
 
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
