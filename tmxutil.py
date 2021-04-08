@@ -13,13 +13,14 @@ import resource
 import operator
 from abc import ABC, ABCMeta, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, OrderedDict, Counter
 from contextlib import contextmanager
 from datetime import datetime
 from functools import partial
 from io import BufferedReader, TextIOWrapper
 from itertools import combinations, chain, starmap
 from logging import info, warning, getLogger, INFO
+from operator import itemgetter
 from pprint import pprint
 from tempfile import TemporaryFile
 from typing import Callable, Dict, List, Optional, Any, Iterator, Iterable, Set, Tuple, Type, TypeVar, BinaryIO, TextIO, IO, Union, cast, Generator
@@ -387,6 +388,24 @@ class PyWriter(Writer):
 
 	def write(self, unit: TranslationUnit) -> None:
 		pprint(unit, stream=self.fh)
+
+
+class CountWriter(Writer):
+	def __init__(self, fh: TextIO, key: Callable[[TranslationUnit], List[Any]]):
+		self.fh = fh
+		self.key = key
+
+	def __enter__(self) -> 'CountWriter':
+		self.counter = Counter()
+		return self
+
+	def __exit__(self, type: Optional[Type[BaseException]], value: Optional[BaseException], traceback: Optional[TracebackType]) -> None:
+		if type is None:
+			for key, count in sorted(self.counter.most_common(), key=itemgetter(1), reverse=True):
+				self.fh.write("{}\t{}\n".format(count, " ".join(key) if isinstance(key, frozenset) else key))
+
+	def write(self, unit: TranslationUnit) -> None:
+		self.counter.update(self.key(unit))
 
 
 class IPCLabeler(object):
@@ -757,10 +776,21 @@ def properties_adder(properties: Dict[str,Set[str]], reader: Iterator[Translatio
 		yield unit
 
 
+def parse_count_property(prop):
+	if prop.endswith('[]'):
+		prop = prop[0:-2]
+		return lambda unit: [frozenset(unit[prop])]
+	if prop.startswith('#'):
+		prop = prop[1:]
+		return lambda unit: [len(unit[prop])]
+	else:
+		return lambda unit: unit[prop]
+
+
 def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'], help='Input file format. Automatically detected if left unspecified.')
-	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py'], default='tmx', help='Output file format. Output is always written to stdout.')
+	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py', 'counts'], default='tmx', help='Output file format. Output is always written to stdout.')
 	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
 	parser.add_argument('-c', '--input-columns', nargs='+', help='Input columns in case of tab input. Column names ending in -1 or -2 will be treated as translation-specific.')
 	parser.add_argument('--output-languages', nargs='+', help='Output languages for tab and txt output. txt output allows only one language, tab multiple.')
@@ -788,6 +818,9 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 
 	if args.verbose:
 		getLogger().setLevel(INFO)
+
+	if args.count_property:
+		args.output_format = 'counts'
 
 	# Create reader. Make sure to call make_reader immediately and not somewhere
 	# down in a nested generator so if one of the files cannot be found, we
@@ -819,24 +852,7 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 		properties = parse_properties(args.properties[0])
 		reader = properties_adder(properties, reader)
 
-	# Create writer
-	if args.output_format == 'tmx':
-		writer = TMXWriter(fout, creation_date=args.creation_date) # type: Writer
-	elif args.output_format == 'tab':
-		writer = TabWriter(fout, args.output_languages)
-	elif args.output_format == 'txt':
-		if not args.output_languages or len(args.output_languages) != 1:
-			return abort("Use --output-languages X to select which language."
-			             " When writing txt, it can only write one language at"
-			             " a time.")
-		writer = TxtWriter(fout, args.output_languages[0])
-	elif args.output_format == 'py':
-		writer = PyWriter(fout)
-	else:
-		raise ValueError('Unknown output format: {}'.format(args.output_format))
-
 	# Optional filter & annotation steps for reader.
-
 	if args.ipc_meta_files:
 		reader = map(IPCLabeler(args.ipc_meta_files).annotate, reader)
 
@@ -860,6 +876,24 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	# If we want to drop properties from the output, do that as the last step.
 	if args.drop_properties:
 		reader = map(partial(del_properties, args.drop_properties), reader)
+
+	# Create writer
+	if args.output_format == 'tmx':
+		writer = TMXWriter(fout, creation_date=args.creation_date) # type: Writer
+	elif args.output_format == 'tab':
+		writer = TabWriter(fout, args.output_languages)
+	elif args.output_format == 'txt':
+		if not args.output_languages or len(args.output_languages) != 1:
+			return abort("Use --output-languages X to select which language."
+			             " When writing txt, it can only write one language at"
+			             " a time.")
+		writer = TxtWriter(fout, args.output_languages[0])
+	elif args.output_format == 'py':
+		writer = PyWriter(fout)
+	elif args.output_format == 'counts':
+		writer = CountWriter(fout, key=args.count_property)
+	else:
+		raise ValueError('Unknown output format: {}'.format(args.output_format))
 
 	# Main loop. with statement for writer so it can write header & footer
 	with writer:
