@@ -438,6 +438,41 @@ class PyWriter(Writer):
 		pprint(unit, stream=self.fh)
 
 
+class TranslationUnitUnpickler(pickle.Unpickler):
+	def find_class(self, module, name):
+		if module == 'tmxutil' or module == '__main__':
+			if name == 'TranslationUnitVariant':
+				return TranslationUnitVariant
+			elif name == 'TranslationUnit':
+				return TranslationUnit
+		raise pickle.UnpicklingError("global '{}.{}' is forbidden".format(module, name))
+
+
+class PickleReader(Reader):
+	def __init__(self, fh: BinaryIO):
+		self.fh = fh
+
+	def close(self):
+		self.fh.close()
+
+	def records(self):
+		try:
+			while True:
+				unit = TranslationUnitUnpickler(self.fh).load()
+				assert isinstance(unit, TranslationUnit)
+				yield unit
+		except EOFError:
+			pass
+
+
+class PickleWriter(Writer):
+	def __init__(self, fh: BinaryIO):
+		self.fh = fh
+
+	def write(self, unit: TranslationUnit) -> None:
+		pickle.dump(unit, self.fh)
+
+
 class CountWriter(Writer):
 	def __init__(self, fh: TextIO, key: Callable[[TranslationUnit], List[Any]]):
 		self.fh = fh
@@ -730,22 +765,23 @@ def make_reader(fh: BufferedBinaryIO, *, input_format: Optional[str] = None, inp
 	else:
 		file_format, format_args = input_format, {}
 
-
-	text_fh = TextIOWrapper(fh, encoding='utf-8')
 	if file_format == 'tab' and 'columns' not in format_args and input_columns:
 		format_args['columns'] = input_columns
 
-	if file_format == 'tmx':
+	if file_format == 'pickle':
+		reader = PickleReader(fh)
+	elif file_format == 'tmx':
+		text_fh = TextIOWrapper(fh, encoding='utf-8')
 		reader = TMXReader(text_fh) # type: Reader
 	elif file_format == 'tab':
 		if not input_languages or len(input_languages) != 2:
 			raise ValueError("'tab' format needs exactly two input languages specified")
+		text_fh = TextIOWrapper(fh, encoding='utf-8')
 		reader = TabReader(text_fh, *input_languages, **format_args)
 	else:
 		raise ValueError("Cannot create file reader for format '{}'".format(file_format))
 
 	# Hook an empty generator to the end that will close the file we opened.
-	return chain(reader, closer(text_fh))
 	return chain(reader, closer(reader))
 
 
@@ -840,8 +876,8 @@ def parse_count_property(prop):
 
 def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
-	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab'], help='Input file format. Automatically detected if left unspecified.')
-	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py', 'counts'], default='tmx', help='Output file format. Output is always written to stdout.')
+	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab', 'pickle'], help='Input file format. Automatically detected if left unspecified.')
+	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py', 'pickle', 'counts'], default='tmx', help='Output file format. Output is always written to stdout.')
 	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
 	parser.add_argument('-c', '--input-columns', nargs='+', help='Input columns in case of tab input. Column names ending in -1 or -2 will be treated as translation-specific.')
 	parser.add_argument('--output-languages', nargs='+', help='Output languages for tab and txt output. txt output allows only one language, tab multiple.')
@@ -943,6 +979,8 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 		writer = TxtWriter(fout, args.output_languages[0])
 	elif args.output_format == 'py':
 		writer = PyWriter(fout)
+	elif args.output_format == 'pickle':
+		writer = PickleWriter(fout.buffer)
 	elif args.output_format == 'counts':
 		writer = CountWriter(fout, key=args.count_property)
 	else:
