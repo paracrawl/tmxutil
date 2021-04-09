@@ -718,35 +718,35 @@ def is_gzipped(fh: BufferedBinaryIO) -> bool:
 	return fh.peek(2).startswith(b'\x1f\x8b')
 
 
-def make_reader(fh: BufferedBinaryIO, args: Namespace = Namespace(input_format=None, input_columns=None, input_languages=None, progress=False)) -> Iterator[TranslationUnit]:
-	if args.progress:
+def make_reader(fh: BufferedBinaryIO, *, input_format: Optional[str] = None, input_columns: Optional[List[str]] = None, input_languages: Optional[List[str]] = None, progress:bool = False, **kwargs) -> Iterator[TranslationUnit]:
+	if progress:
 		fh = ProgressWrapper(fh)
 
 	if is_gzipped(fh):
 		fh = cast(BufferedBinaryIO, gzip.open(fh))
 
-	if not args.input_format:
+	if not input_format:
 		file_format, format_args = autodetect(fh)
 	else:
-		file_format, format_args = args.input_format, {}
+		file_format, format_args = input_format, {}
 
-	if file_format == 'tab' and 'columns' not in format_args and args.input_columns:
-		format_args['columns'] = args.input_columns
 
 	text_fh = TextIOWrapper(fh, encoding='utf-8')
+	if file_format == 'tab' and 'columns' not in format_args and input_columns:
+		format_args['columns'] = input_columns
 
 	if file_format == 'tmx':
 		reader = TMXReader(text_fh) # type: Reader
 	elif file_format == 'tab':
-		if not args.input_languages or len(args.input_languages) != 2:
+		if not input_languages or len(input_languages) != 2:
 			raise ValueError("'tab' format needs exactly two input languages specified")
-		
-		reader = TabReader(text_fh, *args.input_languages, **format_args)
+		reader = TabReader(text_fh, *input_languages, **format_args)
 	else:
 		raise ValueError("Cannot create file reader for format '{}'".format(file_format))
 
 	# Hook an empty generator to the end that will close the file we opened.
 	return chain(reader, closer(text_fh))
+	return chain(reader, closer(reader))
 
 
 def peek_first_line(fh: BufferedBinaryIO, length: int = 128) -> bytes:
@@ -878,7 +878,7 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	# Create reader. Make sure to call make_reader immediately and not somewhere
 	# down in a nested generator so if one of the files cannot be found, we
 	# error out immediately.
-	readers = [make_reader(fh, args) for fh in args.files]
+	readers = [make_reader(fh, **vars(args)) for fh in args.files]
 
 	# Add properties to each specific file? If so, do it before we chain all
 	# readers into a single iterator. If all share the same properties we'll
