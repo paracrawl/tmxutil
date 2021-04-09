@@ -83,7 +83,7 @@ class BufferedBinaryIO(BinaryIO, metaclass=ABCMeta):
 
 
 try:
-	from tqdm import tqdm
+	from tqdm.autonotebook import tqdm
 
 	class ProgressWrapper:
 		"""Wraps around a file-like object and shows a progress bar as to how much
@@ -119,6 +119,7 @@ try:
 except ImportError:
 	# no-op for when tqdm is not available
 	def ProgressWrapper(fh):
+		warning('Python module `tqdm` needs to be installed for --progress to work.')
 		return fh
 
 
