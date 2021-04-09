@@ -235,6 +235,9 @@ class TMXReader(Reader):
 	def __init__(self, fh: TextIO):
 		self.fh = fh
 
+	def close(self):
+		self.fh.close()
+
 	def records(self) -> Iterator[TranslationUnit]:
 		path = [] # type: List[str]
 		stack = [] # type: List[Element]
@@ -346,6 +349,9 @@ class TabReader(Reader):
 		self.src_lang = src_lang
 		self.trg_lang = trg_lang
 		self.columns = columns
+
+	def close(self):
+		self.fh.close()
 
 	def records(self) -> Iterator[TranslationUnit]:
 		class Variant:
@@ -702,7 +708,7 @@ def parse_condition(operators: Dict[str,Callable[[str,str], Callable[[Translatio
 
 def closer(fh: IO[Any]) -> Generator[Any,None,None]:
 	"""Generator that closes fh once it it their turn."""
-	if fh.close:
+	if hasattr(fh, 'close'):
 		fh.close()
 	yield from []
 
