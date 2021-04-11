@@ -14,7 +14,7 @@ import resource
 import operator
 from abc import ABC, ABCMeta, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace
-from collections import defaultdict, OrderedDict, Counter
+from collections import deque, defaultdict, OrderedDict, Counter
 from contextlib import contextmanager
 from datetime import datetime
 from functools import partial
@@ -24,7 +24,7 @@ from logging import info, warning, getLogger, INFO
 from operator import itemgetter
 from pprint import pprint
 from tempfile import TemporaryFile
-from typing import Callable, Dict, List, Optional, Any, Iterator, Iterable, Set, Tuple, Type, TypeVar, BinaryIO, TextIO, IO, Union, cast, Generator
+from typing import Callable, Dict, Deque, List, Counter, Optional, Any, Iterator, Iterable, Set, FrozenSet, Tuple, Type, TypeVar, BinaryIO, TextIO, IO, Union, cast, Generator, Sequence, Mapping
 from types import TracebackType
 from xml.sax.saxutils import escape, quoteattr
 from xml.etree.ElementTree import iterparse, Element
@@ -232,30 +232,18 @@ class TMXReader(Reader):
 	with sets of values as we expect one or more of them, i.e. one or more
 	source-document, ipc, etc."""
 
-	def __init__(self, fh: TextIO):
+	def __init__(self, fh: BinaryIO):
 		self.fh = fh
 
-	def close(self):
+	def close(self) -> None:
 		self.fh.close()
 
 	def records(self) -> Iterator[TranslationUnit]:
-		path = [] # type: List[str]
-		stack = [] # type: List[Element]
-
+		stack = deque() # type: Deque[Element]
+		path = list() # type: List[str]
+		
 		info("TMXReader starts reading from %s", self.fh.name)
 		
-		def enter(element: Element) -> None:
-			stack.append(element)
-			path.append(element.tag)
-
-		def exit(element: Element) -> None:
-			removed = stack.pop()
-			assert removed == element
-			path.pop()
-			if stack:
-				# Remove element from parent to keep the internal tree empty
-				stack[-1].remove(removed)
-
 		unit = TranslationUnit() # type: TranslationUnit
 		translation = TranslationUnitVariant() # type: TranslationUnitVariant
 
@@ -263,7 +251,8 @@ class TMXReader(Reader):
 		
 		for event, element in iterparse(self.fh, events=('start', 'end')):
 			if event == 'start':
-				enter(element)
+				stack.append(element)
+				path.append(element.tag)
 
 				if path == ['tmx', 'body', 'tu']:
 					unit = TranslationUnit(id={element.get('tuid')})
@@ -292,7 +281,10 @@ class TMXReader(Reader):
 					else:
 						translation.text = element.text.strip()
 
-				exit(element)
+				path.pop()
+				stack.pop()
+				if stack:
+					stack[-1].remove(element)
 
 
 class TMXWriter(Writer):
