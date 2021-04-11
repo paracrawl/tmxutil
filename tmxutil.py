@@ -89,7 +89,7 @@ try:
 		"""Wraps around a file-like object and shows a progress bar as to how much
 		of it has been read."""
 
-		def __init__(self, fh):
+		def __init__(self, fh: Any):
 			self.fh = fh
 			self.tqdm = tqdm(
 				desc=fh.name,
@@ -99,26 +99,26 @@ try:
 				unit='b',
 				unit_scale=True)
 
-		def __getattr__(self, attr):
+		def __getattr__(self, attr: str) -> Any:
 			return getattr(self.fh, attr)
 
-		def read(self, size=-1):
+		def read(self, size: int = -1) -> Any:
 			data = self.fh.read(size)
 			self.tqdm.update(len(data))
 			return data
 
-		def read1(self, size=-1):
+		def read1(self, size: int = -1) -> Any:
 			data = self.fh.read1(size)
 			self.tqdm.update(len(data))
 			return data
 
-		def close(self):
+		def close(self) -> None:
 			self.tqdm.close()
 			self.fh.close()
 
 except ImportError:
 	# no-op for when tqdm is not available
-	def ProgressWrapper(fh):
+	def ProgressWrapper(fh: Any) -> Any:
 		warning('Python module `tqdm` needs to be installed for --progress to work.')
 		return fh
 
@@ -132,7 +132,7 @@ class XMLWriter(object):
 		self.stack = [] # type: List[Tuple[str,bool]]
 		self.indent = '  '
 
-	def open(self, name: str, attributes: Dict[str,Any] = dict()) -> None:
+	def open(self, name: str, attributes: Mapping[str,Any] = dict()) -> None:
 		"""Write open tag."""
 
 		if self.stack:
@@ -161,7 +161,7 @@ class XMLWriter(object):
 	def write(self, text: Any) -> None:
 		self.fh.write(escape(str(text).rstrip()))
 
-	def element(self, name: str, attributes: Dict[str,Any] = dict(), text: Optional[str] = None) -> None:
+	def element(self, name: str, attributes: Mapping[str,Any] = dict(), text: Optional[str] = None) -> None:
 		# Notify the parent element it has children (for formatting)
 		if self.stack:
 			self.stack[-1] = (self.stack[-1][0], True)
@@ -336,13 +336,13 @@ class TMXWriter(Writer):
 
 
 class TabReader(Reader):
-	def __init__(self, fh: TextIO, src_lang: str, trg_lang: str, columns: List[str] = ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']):
+	def __init__(self, fh: TextIO, src_lang: str, trg_lang: str, columns: Iterable[str] = ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']):
 		self.fh = fh
 		self.src_lang = src_lang
 		self.trg_lang = trg_lang
 		self.columns = columns
 
-	def close(self):
+	def close(self) -> None:
 		self.fh.close()
 
 	def records(self) -> Iterator[TranslationUnit]:
@@ -431,7 +431,7 @@ class PyWriter(Writer):
 
 
 class TranslationUnitUnpickler(pickle.Unpickler):
-	def find_class(self, module, name):
+	def find_class(self, module: str, name: str) -> Type[Any]:
 		if module == 'tmxutil' or module == '__main__':
 			if name == 'TranslationUnitVariant':
 				return TranslationUnitVariant
@@ -444,10 +444,10 @@ class PickleReader(Reader):
 	def __init__(self, fh: BinaryIO):
 		self.fh = fh
 
-	def close(self):
+	def close(self) -> None:
 		self.fh.close()
 
-	def records(self):
+	def records(self) -> Iterator[TranslationUnit]:
 		try:
 			while True:
 				unit = TranslationUnitUnpickler(self.fh).load()
@@ -471,7 +471,7 @@ class CountWriter(Writer):
 		self.key = key
 
 	def __enter__(self) -> 'CountWriter':
-		self.counter = Counter()
+		self.counter = Counter() # type: Counter[Any]
 		return self
 
 	def __exit__(self, type: Optional[Type[BaseException]], value: Optional[BaseException], traceback: Optional[TracebackType]) -> None:
@@ -719,7 +719,7 @@ def parse_properties(props: str) -> Dict[str,Set[str]]:
 	return properties
 
 
-def parse_condition(operators: Dict[str,Callable[[str,str], Callable[[TranslationUnit], bool]]], expr: str) -> Callable[[TranslationUnit], bool]:
+def parse_condition(operators: Mapping[str,Callable[[str,str], Callable[[TranslationUnit], bool]]], expr: str) -> Callable[[TranslationUnit], bool]:
 	pattern = r'^(?P<lhs>\w[\-\w]*)(?P<op>{operators})(?P<rhs>.+)$'.format(
 		operators='|'.join(re.escape(op) for op in sorted(operators.keys(), key=len, reverse=True)))
 
@@ -733,7 +733,7 @@ def parse_condition(operators: Dict[str,Callable[[str,str], Callable[[Translatio
 	return operators[match.group('op')](match.group('lhs'), match.group('rhs'))
 
 
-def closer(fh: IO[Any]) -> Generator[Any,None,None]:
+def closer(fh: Any) -> Generator[Any,None,None]:
 	"""Generator that closes fh once it it their turn."""
 	if hasattr(fh, 'close'):
 		fh.close()
@@ -745,7 +745,7 @@ def is_gzipped(fh: BufferedBinaryIO) -> bool:
 	return fh.peek(2).startswith(b'\x1f\x8b')
 
 
-def make_reader(fh: BufferedBinaryIO, *, input_format: Optional[str] = None, input_columns: Optional[List[str]] = None, input_languages: Optional[List[str]] = None, progress:bool = False, **kwargs) -> Iterator[TranslationUnit]:
+def make_reader(fh: BufferedBinaryIO, *, input_format: Optional[str] = None, input_columns: Optional[Iterable[str]] = None, input_languages: Optional[Sequence[str]] = None, progress:bool = False, **kwargs: Any) -> Iterator[TranslationUnit]:
 	if progress:
 		fh = ProgressWrapper(fh)
 
@@ -761,10 +761,9 @@ def make_reader(fh: BufferedBinaryIO, *, input_format: Optional[str] = None, inp
 		format_args['columns'] = input_columns
 
 	if file_format == 'pickle':
-		reader = PickleReader(fh)
+		reader: Reader = PickleReader(fh)
 	elif file_format == 'tmx':
-		text_fh = TextIOWrapper(fh, encoding='utf-8')
-		reader = TMXReader(text_fh) # type: Reader
+		reader = TMXReader(fh)
 	elif file_format == 'tab':
 		if not input_languages or len(input_languages) != 2:
 			raise ValueError("'tab' format needs exactly two input languages specified")
@@ -855,7 +854,7 @@ def properties_adder(properties: Dict[str,Set[str]], reader: Iterator[Translatio
 		yield unit
 
 
-def parse_count_property(prop):
+def parse_count_property(prop: str) -> Callable[[TranslationUnit], Iterable[Any]]:
 	if prop.endswith('[]'):
 		prop = prop[0:-2]
 		return lambda unit: [frozenset(unit[prop])]
