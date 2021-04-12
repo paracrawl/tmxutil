@@ -14,7 +14,7 @@ import resource
 import operator
 from abc import ABC, ABCMeta, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace
-from collections import deque, defaultdict, OrderedDict, Counter
+from collections import defaultdict, OrderedDict, Counter
 from contextlib import contextmanager
 from datetime import datetime
 from functools import partial
@@ -24,7 +24,7 @@ from logging import info, warning, getLogger, INFO
 from operator import itemgetter
 from pprint import pprint
 from tempfile import TemporaryFile
-from typing import Callable, Dict, Deque, List, Counter, Optional, Any, Iterator, Iterable, Set, FrozenSet, Tuple, Type, TypeVar, BinaryIO, TextIO, IO, Union, cast, Generator, Sequence, Mapping
+from typing import Callable, Dict, List, Counter, Optional, Any, Iterator, Iterable, Set, FrozenSet, Tuple, Type, TypeVar, BinaryIO, TextIO, IO, Union, cast, Generator, Sequence, Mapping
 from types import TracebackType
 from xml.sax.saxutils import escape, quoteattr
 from xml.etree.ElementTree import iterparse, Element
@@ -163,13 +163,13 @@ class TMXReader(Reader):
 		self.fh.close()
 
 	def records(self) -> Iterator[TranslationUnit]:
-		stack = deque() # type: Deque[Element]
+		stack = list() # type: List[Element]
 		path = list() # type: List[str]
 		
 		info("TMXReader starts reading from %s", self.fh.name)
 		
-		unit = TranslationUnit() # type: TranslationUnit
-		translation = TranslationUnitVariant() # type: TranslationUnitVariant
+		unit: TranslationUnit
+		translation: TranslationUnitVariant
 
 		lang_key = '{http://www.w3.org/XML/1998/namespace}lang'
 		
