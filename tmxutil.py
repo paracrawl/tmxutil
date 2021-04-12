@@ -123,82 +123,6 @@ except ImportError:
 		return fh
 
 
-class XMLWriter(object):
-	"""Writes XML. Light wrapper around iobase.write really, but handles
-	properly indenting and closing xml elements at the right time."""
-
-	def __init__(self, fh: TextIO):
-		self.fh = fh
-		self.stack = [] # type: List[Tuple[str,bool]]
-		self.indent = '  '
-
-	def open(self, name: str, attributes: Mapping[str,Any] = dict()) -> None:
-		"""Write open tag."""
-
-		if self.stack:
-			self.stack[-1] = (self.stack[-1][0], True)
-
-		out = '\n' + (self.indent * len(self.stack)) + '<' + name
-
-		for attr_name, attr_value in attributes.items():
-			out += ' ' + attr_name + '=' + quoteattr(str(attr_value))
-
-		out += '>'
-
-		self.fh.write(out)
-
-		self.stack.append((name, False))
-
-	def close(self) -> None:
-		"""Write close tag. Will use stack to determine which element."""
-
-		name, has_children = self.stack.pop()
-		if has_children:
-			self.fh.write('\n{}</{}>'.format(self.indent * len(self.stack), name))
-		else:
-			self.fh.write('</{}>'.format(name))
-
-	def write(self, text: Any) -> None:
-		self.fh.write(escape(str(text).rstrip()))
-
-	def element(self, name: str, attributes: Mapping[str,Any] = dict(), text: Optional[str] = None) -> None:
-		# Notify the parent element it has children (for formatting)
-		if self.stack:
-			self.stack[-1] = (self.stack[-1][0], True)
-
-		self.fh.write('\n{indent}<{name}{attr}>{text}</{name}>'.format(
-			indent=self.indent * len(self.stack),
-			name=name,
-			text=escape(str(text).rstrip()) if text is not None else '',
-			attr=''.join(
-				' {}={}'.format(attr_name, quoteattr(str(attr_value)))
-				for attr_name, attr_value in attributes.items()
-			)))
-
-	def __enter__(self) -> 'XMLWriter':
-		self.fh.write('<?xml version=\"1.0\"?>')
-		return self
-
-	def __exit__(self, type: Optional[Type[BaseException]], value: Optional[BaseException], traceback: Optional[TracebackType]) -> None:
-		if type is None:
-			while len(self.stack):
-				self.close()
-
-# unit = {
-# 	'score-aligner': float,
-#   'score-bifixer': float,
-#   'score-bicleaner': float,
-#   'hash-bifixer': str,
-# 	'translations': {
-# 		str: {
-# 			'source-document': {str},
-#			'ipc': {str}
-#   		'ipc-group': {str},
-# 			'text': str
-# 		}
-# 	}
-# }
-
 class Reader(ABC):
 	"""Interface for sentence pair input stream."""
 
@@ -287,53 +211,80 @@ class TMXReader(Reader):
 					stack[-1].remove(element)
 
 
+# _escape_cdata and _escape_attrib are copied from 
+# https://github.com/python/cpython/blob/3.9/Lib/xml/etree/ElementTree.py
+def _escape_cdata(text: str) -> str:
+	if "&" in text:
+		text = text.replace("&", "&amp;")
+	if "<" in text:
+		text = text.replace("<", "&lt;")
+	if ">" in text:
+		text = text.replace(">", "&gt;")
+	return text
+
+
+def _escape_attrib(text: str) -> str:
+	if "&" in text:
+		text = text.replace("&", "&amp;")
+	if "<" in text:
+		text = text.replace("<", "&lt;")
+	if ">" in text:
+		text = text.replace(">", "&gt;")
+	if "\"" in text:
+		text = text.replace("\"", "&quot;")
+	if "\r" in text:
+		text = text.replace("\r", "&#13;")
+	if "\n" in text:
+		text = text.replace("\n", "&#10;")
+	if "\t" in text:
+		text = text.replace("\t", "&#09;")
+	return text
+
+
+def _flatten(unit: Mapping[str,Set[str]]) -> Iterator[Tuple[str,str]]:
+	for key, values in unit.items():
+		for value in values:
+			yield key, value
+
+
 class TMXWriter(Writer):
 	def __init__(self, fh: TextIO, *, creation_date: Optional[datetime] = None):
 		self.fh = fh
 		self.creation_date = creation_date
 		
 	def __enter__(self) -> 'TMXWriter':
-		self.writer = XMLWriter(self.fh)
-		self.writer.__enter__()
-		self.writer.open('tmx', {'version': 1.4})
-
-		args = {
-			'o-tmf': 'PlainText',
-			'creationtool': 'tab2tmx.py',
-			'creationtoolversion': __VERSION__,
-			'datatype': 'PlainText',
-			'segtype': 'sentence',
-			'o-encoding': 'utf-8',
-		}
-
-		if self.creation_date is not None:
-			args['creationdate'] = self.creation_date.strftime("%Y%m%dT%H%M%S")
-
-		self.writer.element('header', args) # <header/>
-		
-		self.writer.open('body')
+		self.fh.write('<?xml version="1.0"?>\n'
+					  '<tmx version="1.4">\n'
+					  '  <header\n'
+					  '    o-tmf="PlainText"\n'
+					  '    creationtool="tmxutil"\n'
+					  '    creationtoolversion="' + str(__VERSION__) + '"\n'
+					  '    datatype="PlainText"\n'
+					  '    segtype="sentence"\n'
+					  '    o-encoding="utf-8"\n'
+					  '    creationdate="' + self.creation_date.strftime("%Y%m%dT%H%M%S") + '">\n'
+					  '  </header>\n'
+					  '  <body>\n')
 		return self
 
 	def __exit__(self, type: Optional[Type[BaseException]], value: Optional[BaseException], traceback: Optional[TracebackType]) -> None:
-		self.writer.__exit__(type, value, traceback)
-
-	def _write_prop(self, name: str, value: Set[str]) -> None:
-		for val in sorted(value):
-			self.writer.element('prop', {'type': name}, val)
+		self.fh.write('  </body>\n'
+					        '</tmx>\n')
 
 	def write(self, unit: TranslationUnit) -> None:
-		self.writer.open('tu', {'tuid': first(unit['id']), 'datatype': 'Text'}) # <tu>
-		for key, value in sorted(unit.items()):
+		self.fh.write('    <tu tuid="' + _escape_attrib(str(first(unit['id']))) + '" datatype="Text">\n')
+		for key, value in sorted(_flatten(unit)):
 			if key != 'id':
-				self._write_prop(key, value) # <prop/> * m
+				self.fh.write('      <prop type="' + _escape_attrib(str(key)) + '">' + _escape_cdata(str(value)) + '</prop>\n')
+		
 		for lang, translation in sorted(unit.translations.items()):
-			self.writer.open('tuv', {'xml:lang': lang}) # <tuv> * 2
-			for key, value in sorted(translation.items()):
-				self._write_prop(key, value) # <prop/> * n
-			self.writer.element('seg', text=translation.text) # <seg>..</seg>
-			self.writer.close() # </tuv>
-		self.writer.close() # </tu>
-
+			self.fh.write('      <tuv xml:lang="' + _escape_attrib(lang) + '">\n')
+			for key, value in sorted(_flatten(translation)):
+				self.fh.write('        <prop type="' + _escape_attrib(str(key)) + '">' + _escape_cdata(str(value)) + '</prop>\n')
+			self.fh.write('        <seg>' + _escape_cdata(str(translation.text)) + '</seg>\n'
+			              '      </tuv>\n')
+		self.fh.write('    </tu>\n')
+			
 
 class TabReader(Reader):
 	def __init__(self, fh: TextIO, src_lang: str, trg_lang: str, columns: Iterable[str] = ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']):
