@@ -12,6 +12,8 @@ import gzip
 import pickle
 import resource
 import operator
+import builtins
+import importlib.util
 from abc import ABC, ABCMeta, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace
 from collections import defaultdict, OrderedDict, Counter
@@ -20,14 +22,22 @@ from datetime import datetime
 from functools import partial
 from io import BufferedReader, TextIOWrapper
 from itertools import combinations, chain, starmap
+from functools import reduce
 from logging import info, warning, getLogger, INFO
+from math import floor
 from operator import itemgetter
 from pprint import pprint
 from tempfile import TemporaryFile
+from time import time
 from typing import Callable, Dict, List, Counter, Optional, Any, Iterator, Iterable, Set, FrozenSet, Tuple, Type, TypeVar, BinaryIO, TextIO, IO, Union, cast, Generator, Sequence, Mapping
 from types import TracebackType
 from xml.sax.saxutils import escape, quoteattr
 from xml.etree.ElementTree import iterparse, Element
+
+try:
+	from tqdm.autonotebook import tqdm
+except ImportError:
+	tqdm = None
 
 # Only Python 3.7+ has fromisoformat
 if hasattr(datetime, 'fromisoformat'):
@@ -82,45 +92,36 @@ class BufferedBinaryIO(BinaryIO, metaclass=ABCMeta):
 		...
 
 
-try:
-	from tqdm.autonotebook import tqdm
+class ProgressWrapper:
+	"""Wraps around a file-like object and shows a progress bar as to how much
+	of it has been read."""
 
-	class ProgressWrapper:
-		"""Wraps around a file-like object and shows a progress bar as to how much
-		of it has been read."""
+	def __init__(self, fh: Any):
+		self.fh = fh
+		self.tqdm = tqdm(
+			desc=fh.name,
+			total=os.fstat(fh.fileno()).st_size,
+			initial=fh.seekable() and fh.tell(),
+			file=sys.stderr,
+			unit='b',
+			unit_scale=True)
 
-		def __init__(self, fh: Any):
-			self.fh = fh
-			self.tqdm = tqdm(
-				desc=fh.name,
-				total=os.fstat(fh.fileno()).st_size,
-				initial=fh.seekable() and fh.tell(),
-				file=sys.stderr,
-				unit='b',
-				unit_scale=True)
+	def __getattr__(self, attr: str) -> Any:
+		return getattr(self.fh, attr)
 
-		def __getattr__(self, attr: str) -> Any:
-			return getattr(self.fh, attr)
+	def read(self, size: int = -1) -> Any:
+		data = self.fh.read(size)
+		self.tqdm.update(len(data))
+		return data
 
-		def read(self, size: int = -1) -> Any:
-			data = self.fh.read(size)
-			self.tqdm.update(len(data))
-			return data
+	def read1(self, size: int = -1) -> Any:
+		data = self.fh.read1(size)
+		self.tqdm.update(len(data))
+		return data
 
-		def read1(self, size: int = -1) -> Any:
-			data = self.fh.read1(size)
-			self.tqdm.update(len(data))
-			return data
-
-		def close(self) -> None:
-			self.tqdm.close()
-			self.fh.close()
-
-except ImportError:
-	# no-op for when tqdm is not available
-	def ProgressWrapper(fh: Any) -> Any:
-		warning('Python module `tqdm` needs to be installed for --progress to work.')
-		return fh
+	def close(self) -> None:
+		self.tqdm.close()
+		self.fh.close()
 
 
 class Reader(ABC):
@@ -417,6 +418,9 @@ class PickleWriter(Writer):
 
 
 class CountWriter(Writer):
+	"""Instead of writing tmx records, it counts a property and writes a summary
+	of which values it encountered for that property, and how often it encountered
+	them."""
 	def __init__(self, fh: TextIO, key: Callable[[TranslationUnit], List[Any]]):
 		self.fh = fh
 		self.key = key
@@ -432,6 +436,80 @@ class CountWriter(Writer):
 
 	def write(self, unit: TranslationUnit) -> None:
 		self.counter.update(self.key(unit))
+
+
+class LiveCountWriter(Writer):
+	"""Live variant of CountWriter: shows live updating bars while counting."""
+	def __init__(self, fh: TextIO, key: Callable[[TranslationUnit], List[Any]]):
+		self.fh = fh
+		self.key = key
+		self.top_n = 10
+
+	def __enter__(self) -> 'CountWriter':
+		self.counter = Counter()
+		self.total = 0
+		self.bars = []
+		self.n = 0
+		self.last_update = time()
+		self.last_n = 0
+		self.update_interval = 128
+		return self
+
+	def __exit__(self, type: Optional[Type[BaseException]], value: Optional[BaseException], traceback: Optional[TracebackType]) -> None:
+		for bar in self.bars:
+			bar.close()
+
+		if type is None:
+			for key, count in self.counter.most_common():
+				self.fh.write("{}\t{}\n".format(count, " ".join(sorted(key)) if isinstance(key, frozenset) else key))
+
+	def refresh(self):
+		top = self.counter.most_common(self.top_n)
+		remainder = len(self.counter) - len(top)
+
+		if remainder:
+			remainder_count = self.total - sum(count for _, count in top)
+			top.append(('({} more)'.format(remainder), remainder_count))
+
+		# Make sure we've enough bars
+		while len(top) > len(self.bars):
+			self.bars.append(tqdm(
+				position=len(self.bars)+1,
+				unit='unit',
+				file=sys.stderr,
+				dynamic_ncols=True,
+				bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}'))
+
+		# Determine the label length for alignment
+		label_len=max(len(str(value)) for value, _ in top)
+
+		# Update all bars (sorting by most common on top)
+		for bar, (value, count) in zip(self.bars, top):
+			bar.set_description('{{: <{:d}s}}'.format(label_len+2).format(str(value)), refresh=False)
+			bar.total = self.total
+			bar.n = count
+			bar.refresh()
+
+	def _count_iter(self, iterable):
+		count = 0
+		for item in iterable:
+			count += 1
+			yield item
+		self.total += count
+
+	def _smooth(self, current, target):
+		return floor(0.7 * current + 0.3 * target)
+
+	def write(self, unit: TranslationUnit) -> None:
+		vals = self.key(unit)
+		self.counter.update(self._count_iter(vals))
+		self.n += 1
+		if self.n % self.update_interval == 0:
+			time_since_last_update = max(time() - self.last_update, 1e-10)
+			n_per_sec = self.update_interval / time_since_last_update
+			self.update_interval = max(self._smooth(self.update_interval, 0.5 * n_per_sec), 1)
+			self.last_update = time()
+			self.refresh()
 
 
 class IPCLabeler(object):
@@ -697,7 +775,7 @@ def is_gzipped(fh: BufferedBinaryIO) -> bool:
 
 
 def make_reader(fh: BufferedBinaryIO, *, input_format: Optional[str] = None, input_columns: Optional[Iterable[str]] = None, input_languages: Optional[Sequence[str]] = None, progress:bool = False, **kwargs: Any) -> Iterator[TranslationUnit]:
-	if progress:
+	if tqdm and progress:
 		fh = ProgressWrapper(fh)
 
 	if is_gzipped(fh):
@@ -805,21 +883,78 @@ def properties_adder(properties: Dict[str,Set[str]], reader: Iterator[Translatio
 		yield unit
 
 
-def parse_count_property(prop: str) -> Callable[[TranslationUnit], Iterable[Any]]:
-	if prop.endswith('[]'):
-		prop = prop[0:-2]
-		return lambda unit: [frozenset(unit[prop])]
-	if prop.startswith('#'):
-		prop = prop[1:]
-		return lambda unit: [len(unit[prop])]
+def import_file_as_module(file):
+	filename = os.path.basename(file)
+	basename, ext = os.path.splitext(filename)
+	if ext not in {'.py'}:
+		raise ValueError('Error importing {}: can only import .py files'.format(file))
+
+	spec = importlib.util.spec_from_file_location(basename, file)
+	module = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(module)
+	return module
+
+
+def concat_object(a, b):
+	out = object()
+
+	for module in a, b:
+		for attr in dir(module):
+			setattr(out, attr, getattr(module, attr))
+
+	return out
+
+
+def parse_count_property(expr: str, library: Dict[str,Callable[Any,Any]] = builtins.__dict__) -> Callable[[TranslationUnit], Iterable[Any]]:
+	ops = []
+
+	while True:
+		match = re.match(r'^(?P<fun>[a-zA-Z_]\w*)\((?P<expr>.+?)\)$', expr)
+		if not match:
+			break
+		ops.append(library[match.group('fun')])
+		expr = match.group('expr')
+
+	match = re.match(r'^((?P<lang>[\w-]+)?(?P<dot>\.))?(?P<prop>[\w-]+)(?P<brackets>\[\])?$', expr)
+	if not match:
+		raise ValueError('Could not interpret count expression `{}`'.format(expr))
+
+	prop = match.group('prop')
+
+	# 'en.source-document' or 'en.text'
+	if match.group('lang'):
+		lang = match.group('lang')	
+		if prop == 'text':
+			val_getter = lambda unit: [unit.translations[lang].text]
+		else:
+			val_getter = lambda unit: unit.translations[lang][prop]
+	# e.g. '.collection', only look in root
+	elif match.group('dot'):
+		val_getter = lambda unit: unit[prop]
+	# e.g. 'text'; text can only occur in translations
+	elif prop == 'text':
+		val_getter = lambda unit: (translation.text for translation in unit.translations.values())
+	# e.g. 'source-document' or 'collection'; search through both root and translations
 	else:
-		return lambda unit: unit[prop]
+		val_getter = lambda unit: reduce(lambda acc, translation: acc + list(translation.get(prop, [])), unit.translations.values(), list(unit.get(prop, [])))
+
+	if match.group('brackets'):
+		agg_getter = lambda unit: [frozenset(val_getter(unit))] # convert to frozenset so it can be used as key in dict/Counter
+	else:
+		agg_getter = val_getter
+
+	if ops:
+		fun_getter = lambda unit: (reduce(lambda val, op: op(val), ops, val) for val in agg_getter(unit))
+	else:
+		fun_getter = agg_getter
+
+	return fun_getter
 
 
 def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab', 'pickle'], help='Input file format. Automatically detected if left unspecified.')
-	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py', 'pickle', 'counts'], default='tmx', help='Output file format. Output is always written to stdout.')
+	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py', 'pickle'], default='tmx', help='Output file format. Output is always written to stdout.')
 	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
 	parser.add_argument('-c', '--input-columns', nargs='+', help='Input columns in case of tab input. Column names ending in -1 or -2 will be treated as translation-specific.')
 	parser.add_argument('--output-languages', nargs='+', help='Output languages for tab and txt output. txt output allows only one language, tab multiple.')
@@ -832,10 +967,11 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'), help='One or more IPC grouping files.')
 	parser.add_argument('--with', nargs='+', action='append', dest='filter_with')
 	parser.add_argument('--without', nargs='+', action='append', dest='filter_without')
+	parser.add_argument('-P', '--progress', action='store_true', help='Show progress bar when reading files')
 	parser.add_argument('--verbose', action='store_true', help='Print progress updates.')
 	parser.add_argument('--workspace', type=fromfilesize, help='Mamimum memory usage for deduplication. When exceeded, will continue deduplication using filesystem.', default='4G')
-	parser.add_argument('--count', type=parse_count_property, dest='count_property')
-	parser.add_argument('-P', '--progress', action='store_true', help='Show progress bar when reading files (if possible)')
+	parser.add_argument('--count', dest='count_property', help='Count which values occur for a property. E.g. `.collection` (count every collection observed), `source-document`, `len(en.text)`, `.collection[]`.')
+	parser.add_argument('--include', action='append', default=[], dest='count_libraries', help='Include a python file so functions defined in that file can be used with --count, e.g. include something that provides a domain(url:str) function, and use `--count domain(source-document)`.')
 	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'), help='Input files. May be gzipped. If not specified stdin is used.')
 
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
@@ -849,9 +985,6 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 
 	if args.verbose:
 		getLogger().setLevel(INFO)
-
-	if args.count_property:
-		args.output_format = 'counts'
 
 	# Create reader. Make sure to call make_reader immediately and not somewhere
 	# down in a nested generator so if one of the files cannot be found, we
@@ -909,7 +1042,17 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 		reader = map(partial(del_properties, args.drop_properties), reader)
 
 	# Create writer
-	if args.output_format == 'tmx':
+	if args.count_property:
+		count_property = parse_count_property(args.count_property,
+			reduce(lambda obj, file: {**obj, **import_file_as_module(file).__dict__},
+				args.count_libraries,
+				builtins.__dict__))
+
+		if tqdm and args.progress:
+			writer = LiveCountWriter(fout, key=count_property)
+		else:
+			writer = CountWriter(fout, key=count_property)
+	elif args.output_format == 'tmx':
 		writer = TMXWriter(fout, creation_date=args.creation_date) # type: Writer
 	elif args.output_format == 'tab':
 		writer = TabWriter(fout, args.output_languages)
@@ -923,8 +1066,6 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 		writer = PyWriter(fout)
 	elif args.output_format == 'pickle':
 		writer = PickleWriter(fout.buffer)
-	elif args.output_format == 'counts':
-		writer = CountWriter(fout, key=args.count_property)
 	else:
 		raise ValueError('Unknown output format: {}'.format(args.output_format))
 
