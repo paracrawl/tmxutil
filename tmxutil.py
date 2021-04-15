@@ -13,8 +13,9 @@ import pickle
 import resource
 import operator
 import importlib.util
+from textwrap import dedent
 from abc import ABC, ABCMeta, abstractmethod
-from argparse import ArgumentParser, FileType, Namespace
+from argparse import ArgumentParser, FileType, Namespace, RawDescriptionHelpFormatter
 from collections import defaultdict, OrderedDict, Counter
 from contextlib import contextmanager
 from datetime import datetime
@@ -951,7 +952,42 @@ def parse_count_property(expr: str, library: Dict[str,Callable[Any,Any]] = {'len
 
 
 def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
-	parser = ArgumentParser(description='Annotate, filter and convert tmx files')
+	parser = ArgumentParser(
+		formatter_class=RawDescriptionHelpFormatter,
+		description='Annotate, analyze, filter and convert (mainly) tmx files',
+		epilog=dedent('''
+		Supported syntax for FILTER_EXPR:
+		  Syntax: PROPERTY OPERATOR VALUE where:
+		    PROPERTY            Either 'text' or the value of the "type" attribute
+		                        of a <prop/> element.
+		    OPERATOR            Supported operators:
+		                          >, >=, <, <= for numeric comparisons.
+		                          =, =~ for string comparisons.
+		    VALUE               String, number or regular expression.
+
+		  Examples:
+		    collection=europat  Matches sentence pairs that have a property 
+		                        'collection' that is exactly 'europat'.
+		    text=~euro.*        Matches pairs that match a regular expression.
+		    id>400              Matches pairs that have an id larger than 400
+
+		Supported syntax for COUNT_EXPR:
+		  Syntax: [FUNCTION] ( [LANG] [.] PROPERTY [\\[\\]] ) where all except
+		          PROPERTY is optional. If FUNCTION is not used, you don't need the
+		          parenthesis. The [] after PROPERTY can be used to indicate that
+		          all values of that property for a <tu/> should be treated as a
+		          single set.
+
+		  Examples:
+		    source-document     Count every prop type "source-document", either as
+		                        part of the <tu/> or <tuv/>.
+		    .collection         Count every collection observed as a prop of the
+		                        sentence pair.
+		    .collection[]       Count every combination of <prop type="collection"/>
+		                        observed in <tu/>.
+		    len(en.text)        String length of english side of the sentence pair.
+		                        You can use your own functions using --include.
+	'''))
 	parser.add_argument('-i', '--input-format', choices=['tmx', 'tab', 'pickle'], help='Input file format. Automatically detected if left unspecified.')
 	parser.add_argument('-o', '--output-format', choices=['tmx', 'tab', 'txt', 'py', 'pickle'], default='tmx', help='Output file format. Output is always written to stdout.')
 	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
@@ -964,14 +1000,14 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser.add_argument('--renumber-output', action='store_true', help='Renumber the translation unit ids. Always enabled when multiple input files are given.')
 	parser.add_argument('--ipc', dest='ipc_meta_files', action='append', type=FileType('r'), help='One or more IPC metadata files.')
 	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'), help='One or more IPC grouping files.')
-	parser.add_argument('--with', nargs='+', action='append', dest='filter_with')
-	parser.add_argument('--without', nargs='+', action='append', dest='filter_without')
+	parser.add_argument('--with', nargs='+', action='append', dest='filter_with', metavar='FILTER_EXPR')
+	parser.add_argument('--without', nargs='+', action='append', dest='filter_without', metavar='FILTER_EXPR')
 	parser.add_argument('-P', '--progress', action='store_true', help='Show progress bar when reading files.')
 	logging_options = parser.add_mutually_exclusive_group()
 	logging_options.add_argument('-q', '--quiet', action='store_true', help='Hide issues encountered while reading files.')
 	logging_options.add_argument('-v', '--verbose', action='store_true', help='Print progress updates.')
 	parser.add_argument('--workspace', type=fromfilesize, help='Mamimum memory usage for deduplication. When exceeded, will continue deduplication using filesystem.', default='4G')
-	parser.add_argument('--count', dest='count_property', help='Count which values occur for a property. E.g. `.collection` (count every collection observed), `source-document`, `len(en.text)`, `.collection[]`.')
+	parser.add_argument('--count', dest='count_property', help='Count which values occur for a property.', metavar='COUNT_EXPR')
 	parser.add_argument('--include', action='append', default=[], dest='count_libraries', help='Include a python file so functions defined in that file can be used with --count, e.g. include something that provides a domain(url:str) function, and use `--count domain(source-document)`.')
 	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'), help='Input files. May be gzipped. If not specified stdin is used.')
 
