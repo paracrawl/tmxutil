@@ -12,7 +12,6 @@ import gzip
 import pickle
 import resource
 import operator
-import builtins
 import importlib.util
 from abc import ABC, ABCMeta, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace
@@ -905,7 +904,7 @@ def concat_object(a, b):
 	return out
 
 
-def parse_count_property(expr: str, library: Dict[str,Callable[Any,Any]] = builtins.__dict__) -> Callable[[TranslationUnit], Iterable[Any]]:
+def parse_count_property(expr: str, library: Dict[str,Callable[Any,Any]] = {'len': len}) -> Callable[[TranslationUnit], Iterable[Any]]:
 	ops = []
 
 	while True:
@@ -1046,7 +1045,7 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 		count_property = parse_count_property(args.count_property,
 			reduce(lambda obj, file: {**obj, **import_file_as_module(file).__dict__},
 				args.count_libraries,
-				builtins.__dict__))
+				{'len': len}))
 
 		if tqdm and args.progress:
 			writer = LiveCountWriter(fout, key=count_property)
