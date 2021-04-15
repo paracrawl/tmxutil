@@ -22,7 +22,7 @@ from functools import partial
 from io import BufferedReader, TextIOWrapper
 from itertools import combinations, chain, starmap
 from functools import reduce
-from logging import info, warning, getLogger, INFO
+from logging import info, warning, getLogger, INFO, ERROR
 from math import floor
 from operator import itemgetter
 from pprint import pprint
@@ -966,8 +966,10 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser.add_argument('--ipc-group', dest='ipc_group_files', action='append', type=FileType('r'), help='One or more IPC grouping files.')
 	parser.add_argument('--with', nargs='+', action='append', dest='filter_with')
 	parser.add_argument('--without', nargs='+', action='append', dest='filter_without')
-	parser.add_argument('-P', '--progress', action='store_true', help='Show progress bar when reading files')
-	parser.add_argument('--verbose', action='store_true', help='Print progress updates.')
+	parser.add_argument('-P', '--progress', action='store_true', help='Show progress bar when reading files.')
+	logging_options = parser.add_mutually_exclusive_group()
+	logging_options.add_argument('-q', '--quiet', action='store_true', help='Hide issues encountered while reading files.')
+	logging_options.add_argument('-v', '--verbose', action='store_true', help='Print progress updates.')
 	parser.add_argument('--workspace', type=fromfilesize, help='Mamimum memory usage for deduplication. When exceeded, will continue deduplication using filesystem.', default='4G')
 	parser.add_argument('--count', dest='count_property', help='Count which values occur for a property. E.g. `.collection` (count every collection observed), `source-document`, `len(en.text)`, `.collection[]`.')
 	parser.add_argument('--include', action='append', default=[], dest='count_libraries', help='Include a python file so functions defined in that file can be used with --count, e.g. include something that provides a domain(url:str) function, and use `--count domain(source-document)`.')
@@ -984,6 +986,8 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 
 	if args.verbose:
 		getLogger().setLevel(INFO)
+	elif args.quiet:
+		getLogger().setLevel(ERROR)
 
 	# Create reader. Make sure to call make_reader immediately and not somewhere
 	# down in a nested generator so if one of the files cannot be found, we
