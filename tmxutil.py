@@ -905,7 +905,7 @@ def concat_object(a, b):
 	return out
 
 
-def parse_count_property(expr: str, library: Dict[str,Callable[Any,Any]] = {'len': len}) -> Callable[[TranslationUnit], Iterable[Any]]:
+def parse_count_property(expr: str, library: Dict[str,Callable[[Any],Any]] = {'len': len}) -> Callable[[TranslationUnit], Iterable[Any]]:
 	ops = []
 
 	while True:
