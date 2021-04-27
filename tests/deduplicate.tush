@@ -47,7 +47,15 @@ $ echo '<?xml version="1.0"?>\n' \
  '</tmx>\n' | ../tmxutil.py --creation-date 2020-01-01 --deduplicate
 | <?xml version="1.0"?>
 | <tmx version="1.4">
-|   <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>
+|   <header
+|     o-tmf="PlainText"
+|     creationtool="tmxutil"
+|     creationtoolversion="1.1"
+|     datatype="PlainText"
+|     segtype="sentence"
+|     o-encoding="utf-8"
+|     creationdate="20200101T000000">
+|   </header>
 |   <body>
 |     <tu tuid="1" datatype="Text">
 |       <prop type="hash-bifixer">0xSAMEHASH</prop>
@@ -118,7 +126,15 @@ $ echo '<?xml version="1.0"?>\n' \
  '</tmx>\n' | ../tmxutil.py --creation-date 2020-01-01 --deduplicate
 | <?xml version="1.0"?>
 | <tmx version="1.4">
-|   <header o-tmf="PlainText" creationtool="tab2tmx.py" creationtoolversion="1.1" datatype="PlainText" segtype="sentence" o-encoding="utf-8" creationdate="20200101T000000"></header>
+|   <header
+|     o-tmf="PlainText"
+|     creationtool="tmxutil"
+|     creationtoolversion="1.1"
+|     datatype="PlainText"
+|     segtype="sentence"
+|     o-encoding="utf-8"
+|     creationdate="20200101T000000">
+|   </header>
 |   <body>
 |     <tu tuid="0" datatype="Text">
 |       <tuv xml:lang="l1">
