@@ -951,7 +951,7 @@ def parse_count_property(expr: str, library: Dict[str,Callable[[Any],Any]] = {'l
 	return fun_getter
 
 
-def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
+def main(argv: List[str], stdin: BufferedBinaryIO, stdout: BufferedBinaryIO) -> int:
 	parser = ArgumentParser(
 		formatter_class=RawDescriptionHelpFormatter,
 		description='Annotate, analyze, filter and convert (mainly) tmx files',
@@ -993,6 +993,7 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
 	parser.add_argument('-c', '--input-columns', nargs='+', help='Input columns in case of tab input. Column names ending in -1 or -2 will be treated as translation-specific.')
 	parser.add_argument('--output-languages', nargs='+', help='Output languages for tab and txt output. txt output allows only one language, tab multiple.')
+	parser.add_argument('--output', default=stdout, type=FileType('wb'), help='Output file. Defaults to stdout.')
 	parser.add_argument('--creation-date', type=fromisoformat, default=datetime.now(), help='override creation date in tmx output.')
 	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
 	parser.add_argument('-d', '--deduplicate', action='store_true', help='Deduplicate units before printing. Unit properties are combined where possible. If score-bifixer and hash-bifixer are avaiable, these will be used.')
@@ -1009,7 +1010,7 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 	parser.add_argument('--workspace', type=fromfilesize, help='Mamimum memory usage for deduplication. When exceeded, will continue deduplication using filesystem.', default='4G')
 	parser.add_argument('--count', dest='count_property', help='Count which values occur for a property.', metavar='COUNT_EXPR')
 	parser.add_argument('--include', action='append', default=[], dest='count_libraries', help='Include a python file so functions defined in that file can be used with --count, e.g. include something that provides a domain(url:str) function, and use `--count domain(source-document)`.')
-	parser.add_argument('files', nargs='*', default=[stdin.buffer], type=FileType('rb'), help='Input files. May be gzipped. If not specified stdin is used.')
+	parser.add_argument('files', nargs='*', default=[stdin], type=FileType('rb'), help='Input files. May be gzipped. If not specified stdin is used.')
 
 	# I prefer the modern behaviour where you can do `tmxutil.py -p a=1 file.tmx
 	# -p a=2 file2.tmx` etc. but that's only available since Python 3.7.
@@ -1017,8 +1018,6 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 		args = parser.parse_intermixed_args(argv)
 	else:
 		args = parser.parse_args(argv)
-
-	fout = stdout
 
 	if args.verbose:
 		getLogger().setLevel(INFO)
@@ -1088,23 +1087,23 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 				{'len': len}))
 
 		if tqdm and args.progress:
-			writer = LiveCountWriter(fout, key=count_property)
+			writer = LiveCountWriter(TextIOWrapper(args.output, encoding='utf-8'), key=count_property)
 		else:
-			writer = CountWriter(fout, key=count_property)
+			writer = CountWriter(TextIOWrapper(args.output, encoding='utf-8'), key=count_property)
 	elif args.output_format == 'tmx':
-		writer = TMXWriter(fout, creation_date=args.creation_date) # type: Writer
+		writer = TMXWriter(TextIOWrapper(args.output, encoding='utf-8'), creation_date=args.creation_date) # type: Writer
 	elif args.output_format == 'tab':
-		writer = TabWriter(fout, args.output_languages)
+		writer = TabWriter(TextIOWrapper(args.output, encoding='utf-8'), args.output_languages)
 	elif args.output_format == 'txt':
 		if not args.output_languages or len(args.output_languages) != 1:
 			return abort("Use --output-languages X to select which language."
 			             " When writing txt, it can only write one language at"
 			             " a time.")
-		writer = TxtWriter(fout, args.output_languages[0])
+		writer = TxtWriter(TextIOWrapper(args.output, encoding='utf-8'), args.output_languages[0])
 	elif args.output_format == 'py':
-		writer = PyWriter(fout)
+		writer = PyWriter(TextIOWrapper(args.output, encoding='utf-8'))
 	elif args.output_format == 'pickle':
-		writer = PickleWriter(fout.buffer)
+		writer = PickleWriter(args.output)
 	else:
 		raise ValueError('Unknown output format: {}'.format(args.output_format))
 
@@ -1121,6 +1120,6 @@ def main(argv: List[str], stdin: TextIO, stdout: TextIO) -> int:
 
 if __name__ == '__main__':
 	try:
-		sys.exit(main(sys.argv[1:], sys.stdin, sys.stdout))
+		sys.exit(main(sys.argv[1:], sys.stdin.buffer, sys.stdout.buffer))
 	except ValueError as e:
 		sys.exit(abort("Error: {}".format(e)))
