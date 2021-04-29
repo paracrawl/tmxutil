@@ -17,7 +17,7 @@ from textwrap import dedent
 from abc import ABC, ABCMeta, abstractmethod
 from argparse import ArgumentParser, FileType, Namespace, RawDescriptionHelpFormatter
 from collections import defaultdict, OrderedDict, Counter
-from contextlib import contextmanager
+from contextlib import ExitStack
 from datetime import datetime
 from functools import partial
 from io import BufferedReader, TextIOWrapper
@@ -673,50 +673,21 @@ def deduplicate_merge(best_unit: TranslationUnit, new_unit: TranslationUnit, sor
 	return best_unit
 
 
-
-def translation_unit_test_prop(lhs: str, test: Callable[[Set[str]], bool], unit: TranslationUnit) -> bool:
-	"""Tests a translation unit property, whether it is inside a translation
-	or a unit level property."""
-	if lhs in unit:
-		return test(unit[lhs])
-
-	for lang, translation_unit in unit.translations.items():
-		if lhs == 'text':
-			return test({translation_unit.text})
-		elif lhs in translation_unit:
-			if test(translation_unit[lhs]):
-				return True
-	else:
-		return False
-
-
 T = TypeVar('T', float, str)
 
 def build_binary_condition(type: Type[T], op: Callable[[T,T], bool]) -> Callable[[str,str], Callable[[TranslationUnit], bool]]:
 	"""Wrapper for standard python operations on types. I.e. to implement gt
 	and lt."""
-	def build_condition(lhs: str, rhs: str) -> Callable[[TranslationUnit], bool]:
-		def test(val: Set[str]) -> bool:
-			return any(op(type(el), type(rhs)) for el in val)
-		return partial(translation_unit_test_prop, lhs, test)
+	def build_condition(lhs: Callable[[TranslationUnit], Iterable[Any]], rhs: str) -> Callable[[TranslationUnit], bool]:
+		return lambda unit: any(op(type(el), type(rhs)) for el in lhs(unit))
 	return build_condition
 
 
-def build_eq_condition(lhs: str, rhs: str) -> Callable[[TranslationUnit], bool]:
-	"""Specialised version of build_binary_condition that uses 'in' for set
-	tests instead of iterating over all elements in the set."""
-	def test(val: Set[str]) -> bool:
-		return rhs in val
-	return partial(translation_unit_test_prop, lhs, test)
-
-
-def build_regex_condition(lhs: str, rhs: str) -> Callable[[TranslationUnit], bool]:
+def build_regex_condition(lhs: Callable[[TranslationUnit], Iterable[Any]], rhs: str) -> Callable[[TranslationUnit], bool]:
 	"""Specialised version (or wrapper around) build_binary_condition that makes
 	one that tests a regular expression."""
 	pattern = re.compile(rhs)
-	def test(val: Set[str]) -> bool:
-		return any(pattern.search(el) is not None for el in val)
-	return partial(translation_unit_test_prop, lhs, test)
+	return lambda unit: any(pattern.search(str(el)) is not None for el in lhs(unit))
 
 
 condition_operators = {
@@ -724,7 +695,7 @@ condition_operators = {
 	 '>': build_binary_condition(float, operator.gt),
 	'<=': build_binary_condition(float, operator.le),
 	'>=': build_binary_condition(float, operator.ge),
-	 '=': build_eq_condition,
+	 '=': build_binary_condition(str, operator.eq),
 	'=~': build_regex_condition
 }
 
@@ -748,8 +719,8 @@ def parse_properties(props: str) -> Dict[str,Set[str]]:
 	return properties
 
 
-def parse_condition(operators: Mapping[str,Callable[[str,str], Callable[[TranslationUnit], bool]]], expr: str) -> Callable[[TranslationUnit], bool]:
-	pattern = r'^(?P<lhs>\w[\-\w]*)(?P<op>{operators})(?P<rhs>.+)$'.format(
+def parse_condition(operators: Mapping[str,Callable[[str,str], Callable[[TranslationUnit], bool]]], expr: str, functions={}) -> Callable[[TranslationUnit], bool]:
+	pattern = r'^(?P<lhs>.+?)(?P<op>{operators})(?P<rhs>.*)$'.format(
 		operators='|'.join(re.escape(op) for op in sorted(operators.keys(), key=len, reverse=True)))
 
 	match = re.match(pattern, expr)
@@ -759,7 +730,59 @@ def parse_condition(operators: Mapping[str,Callable[[str,str], Callable[[Transla
 
 	info("Using expression op:'%(op)s' lhs:'%(lhs)s' rhs:'%(rhs)s'", match.groupdict())
 
-	return operators[match.group('op')](match.group('lhs'), match.group('rhs'))
+	prop_getter = parse_property_getter(match.group('lhs'), functions=functions)
+
+	return operators[match.group('op')](prop_getter, match.group('rhs'))
+
+
+def parse_property_getter(expr: str, functions: Dict[str,Callable[[Any],Any]] = {'len': len}) -> Callable[[TranslationUnit], Iterable[Any]]:
+	ops = []
+
+	while True:
+		match = re.match(r'^(?P<fun>[a-zA-Z_]\w*)\((?P<expr>.+?)\)$', expr)
+		if not match:
+			break
+
+		if not match.group('fun') in functions:
+			raise ValueError('Function `{}` in expression `{}` not found.'.format(match.group('fun'), expr))
+
+		ops.insert(0, functions[match.group('fun')])
+		expr = match.group('expr')
+
+	match = re.match(r'^((?P<lang>[\w-]+)?(?P<dot>\.))?(?P<prop>[\w-]+)(?P<brackets>\[\])?$', expr)
+	if not match:
+		raise ValueError('Could not interpret expression `{}`'.format(expr))
+
+	prop = match.group('prop')
+
+	# 'en.source-document' or 'en.text'
+	if match.group('lang'):
+		lang = match.group('lang')	
+		if prop == 'text':
+			val_getter = lambda unit: [unit.translations[lang].text]
+		else:
+			val_getter = lambda unit: unit.translations[lang][prop]
+	# e.g. '.collection', only look in root
+	elif match.group('dot'):
+		val_getter = lambda unit: unit[prop]
+	# e.g. 'text'; text can only occur in translations
+	elif prop == 'text':
+		val_getter = lambda unit: (translation.text for translation in unit.translations.values())
+	# e.g. 'source-document' or 'collection'; search through both root and translations
+	else:
+		val_getter = lambda unit: reduce(lambda acc, translation: acc + list(translation.get(prop, [])), unit.translations.values(), list(unit.get(prop, [])))
+
+	if match.group('brackets'):
+		agg_getter = lambda unit: [frozenset(val_getter(unit))] # convert to frozenset so it can be used as key in dict/Counter
+	else:
+		agg_getter = val_getter
+
+	if ops:
+		fun_getter = lambda unit: (reduce(lambda val, op: op(val), ops, val) for val in agg_getter(unit))
+	else:
+		fun_getter = agg_getter
+
+	return fun_getter
 
 
 def closer(fh: Any) -> Generator[Any,None,None]:
@@ -895,70 +918,14 @@ def import_file_as_module(file):
 	return module
 
 
-def concat_object(a, b):
-	out = object()
-
-	for module in a, b:
-		for attr in dir(module):
-			setattr(out, attr, getattr(module, attr))
-
-	return out
-
-
-def parse_count_property(expr: str, library: Dict[str,Callable[[Any],Any]] = {'len': len}) -> Callable[[TranslationUnit], Iterable[Any]]:
-	ops = []
-
-	while True:
-		match = re.match(r'^(?P<fun>[a-zA-Z_]\w*)\((?P<expr>.+?)\)$', expr)
-		if not match:
-			break
-		ops.append(library[match.group('fun')])
-		expr = match.group('expr')
-
-	match = re.match(r'^((?P<lang>[\w-]+)?(?P<dot>\.))?(?P<prop>[\w-]+)(?P<brackets>\[\])?$', expr)
-	if not match:
-		raise ValueError('Could not interpret count expression `{}`'.format(expr))
-
-	prop = match.group('prop')
-
-	# 'en.source-document' or 'en.text'
-	if match.group('lang'):
-		lang = match.group('lang')	
-		if prop == 'text':
-			val_getter = lambda unit: [unit.translations[lang].text]
-		else:
-			val_getter = lambda unit: unit.translations[lang][prop]
-	# e.g. '.collection', only look in root
-	elif match.group('dot'):
-		val_getter = lambda unit: unit[prop]
-	# e.g. 'text'; text can only occur in translations
-	elif prop == 'text':
-		val_getter = lambda unit: (translation.text for translation in unit.translations.values())
-	# e.g. 'source-document' or 'collection'; search through both root and translations
-	else:
-		val_getter = lambda unit: reduce(lambda acc, translation: acc + list(translation.get(prop, [])), unit.translations.values(), list(unit.get(prop, [])))
-
-	if match.group('brackets'):
-		agg_getter = lambda unit: [frozenset(val_getter(unit))] # convert to frozenset so it can be used as key in dict/Counter
-	else:
-		agg_getter = val_getter
-
-	if ops:
-		fun_getter = lambda unit: (reduce(lambda val, op: op(val), ops, val) for val in agg_getter(unit))
-	else:
-		fun_getter = agg_getter
-
-	return fun_getter
-
-
 def main(argv: List[str], stdin: BufferedBinaryIO, stdout: BufferedBinaryIO) -> int:
 	parser = ArgumentParser(
 		formatter_class=RawDescriptionHelpFormatter,
 		description='Annotate, analyze, filter and convert (mainly) tmx files',
 		epilog=dedent('''
 		Supported syntax for FILTER_EXPR:
-		  Syntax: PROPERTY OPERATOR VALUE where:
-		    PROPERTY            Either 'text' or the value of the "type" attribute
+		  Syntax: PROP_EXPR OPERATOR VALUE where:
+		    PROP_EXPR           Either 'text' or the value of the "type" attribute
 		                        of a <prop/> element.
 		    OPERATOR            Supported operators:
 		                          >, >=, <, <= for numeric comparisons.
@@ -971,7 +938,7 @@ def main(argv: List[str], stdin: BufferedBinaryIO, stdout: BufferedBinaryIO) -> 
 		    text=~euro.*        Matches pairs that match a regular expression.
 		    id>400              Matches pairs that have an id larger than 400
 
-		Supported syntax for COUNT_EXPR:
+		Supported syntax for PROP_EXPR:
 		  Syntax: [FUNCTION] ( [LANG] [.] PROPERTY [\\[\\]] ) where all except
 		          PROPERTY is optional. If FUNCTION is not used, you don't need the
 		          parenthesis. The [] after PROPERTY can be used to indicate that
@@ -1024,6 +991,11 @@ def main(argv: List[str], stdin: BufferedBinaryIO, stdout: BufferedBinaryIO) -> 
 	elif args.quiet:
 		getLogger().setLevel(ERROR)
 
+	# Load in functions early so if anything is wrong with them we'll know before
+	# we attempt to parse anything.
+	functions = reduce(lambda obj, file: {**obj, **import_file_as_module(file).__dict__},
+	                   args.count_libraries, {'len': len})
+
 	# Create reader. Make sure to call make_reader immediately and not somewhere
 	# down in a nested generator so if one of the files cannot be found, we
 	# error out immediately.
@@ -1062,11 +1034,11 @@ def main(argv: List[str], stdin: BufferedBinaryIO, stdout: BufferedBinaryIO) -> 
 		reader = map(IPCGroupLabeler(args.ipc_group_files).annotate, reader)
 
 	if args.filter_with:
-		dnf = [[parse_condition(condition_operators, cond_str) for cond_str in cond_expr] for cond_expr in args.filter_with]
+		dnf = [[parse_condition(condition_operators, cond_str, functions=functions) for cond_str in cond_expr] for cond_expr in args.filter_with]
 		reader = filter(lambda unit: any(all(expr(unit) for expr in cond) for cond in dnf), reader)
 
 	if args.filter_without:
-		dnf = [[parse_condition(condition_operators, cond_str) for cond_str in cond_expr] for cond_expr in args.filter_without]
+		dnf = [[parse_condition(condition_operators, cond_str, functions=functions) for cond_str in cond_expr] for cond_expr in args.filter_without]
 		reader = filter(lambda unit: all(any(not expr(unit) for expr in cond) for cond in dnf), reader)
 
 	if args.deduplicate:
@@ -1080,35 +1052,39 @@ def main(argv: List[str], stdin: BufferedBinaryIO, stdout: BufferedBinaryIO) -> 
 		reader = map(partial(del_properties, args.drop_properties), reader)
 
 	# Create writer
-	if args.count_property:
-		count_property = parse_count_property(args.count_property,
-			reduce(lambda obj, file: {**obj, **import_file_as_module(file).__dict__},
-				args.count_libraries,
-				{'len': len}))
+	with ExitStack() as ctx:
+		if args.output_format == 'pickle':
+			writer = ctx.enter_context(PickleWriter(args.output)) # type: Writer
 
-		if tqdm and args.progress:
-			writer = LiveCountWriter(TextIOWrapper(args.output, encoding='utf-8'), key=count_property)
 		else:
-			writer = CountWriter(TextIOWrapper(args.output, encoding='utf-8'), key=count_property)
-	elif args.output_format == 'tmx':
-		writer = TMXWriter(TextIOWrapper(args.output, encoding='utf-8'), creation_date=args.creation_date) # type: Writer
-	elif args.output_format == 'tab':
-		writer = TabWriter(TextIOWrapper(args.output, encoding='utf-8'), args.output_languages)
-	elif args.output_format == 'txt':
-		if not args.output_languages or len(args.output_languages) != 1:
-			return abort("Use --output-languages X to select which language."
-			             " When writing txt, it can only write one language at"
-			             " a time.")
-		writer = TxtWriter(TextIOWrapper(args.output, encoding='utf-8'), args.output_languages[0])
-	elif args.output_format == 'py':
-		writer = PyWriter(TextIOWrapper(args.output, encoding='utf-8'))
-	elif args.output_format == 'pickle':
-		writer = PickleWriter(args.output)
-	else:
-		raise ValueError('Unknown output format: {}'.format(args.output_format))
+			text_out = ctx.enter_context(TextIOWrapper(args.output, encoding='utf-8'))
+			
+			if args.count_property:
+				count_property = parse_property_getter(args.count_property, functions=functions)
+					
 
-	# Main loop. with statement for writer so it can write header & footer
-	with writer:
+				if tqdm and args.progress:
+					writer = ctx.enter_context(LiveCountWriter(text_out, key=count_property))
+				else:
+					writer = ctx.enter_context(CountWriter(text_out, key=count_property))
+			elif args.output_format == 'tmx':
+				writer = ctx.enter_context(TMXWriter(text_out, creation_date=args.creation_date))
+			elif args.output_format == 'tab':
+				writer = ctx.enter_context(TabWriter(text_out, args.output_languages))
+			elif args.output_format == 'txt':
+				if not args.output_languages or len(args.output_languages) != 1:
+					return abort("Use --output-languages X to select which language."
+					             " When writing txt, it can only write one language at"
+					             " a time.")
+				writer = ctx.enter_context(TxtWriter(text_out, args.output_languages[0]))
+			elif args.output_format == 'py':
+				writer = ctx.enter_context(PyWriter(text_out))
+			elif args.output_format == 'pickle':
+				writer = ctx.enter_context(PickleWriter(args.output))
+			else:
+				raise ValueError('Unknown output format: {}'.format(args.output_format))
+
+		# Main loop. with statement for writer so it can write header & footer
 		count = 0
 		for unit in reader:
 			writer.write(unit)
