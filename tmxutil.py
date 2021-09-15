@@ -525,9 +525,15 @@ class IPCLabeler(object):
 
 	def load(self, fh: TextIO) -> None:
 		for line in fh:
-			src_id, _, _, _, src_lang, src_ipcs, trg_id, _, _, _, trg_lang, trg_ipcs = line.split('\t', 11)
+			parts = line.split('\t', 11)
+			if len(parts) != 6 and len(parts) != 12:
+				warning("Expected 6 or 12 fields while reading IPC file, found %d, in %s:%d", len(parts), fh.name, line)
+				continue
+			src_id, _, _, _, src_lang, src_ipcs = parts[:6]
 			self.lut[(src_lang.lower(), src_id)] = set(ipc.strip() for ipc in src_ipcs.split(',') if ipc.strip() != '')
-			self.lut[(trg_lang.lower(), trg_id)] = set(ipc.strip() for ipc in trg_ipcs.split(',') if ipc.strip() != '')
+			if len(parts) == 12:
+				trg_id, _, _, _, trg_lang, trg_ipcs = parts[6:]
+				self.lut[(trg_lang.lower(), trg_id)] = set(ipc.strip() for ipc in trg_ipcs.split(',') if ipc.strip() != '')
 
 	def annotate(self, unit: TranslationUnit) -> TranslationUnit:
 		for lang, translation in unit.translations.items():
