@@ -275,17 +275,18 @@ class TMXWriter(Writer):
 	def write(self, unit: TranslationUnit) -> None:
 		self.fh.write('    <tu tuid="' + _escape_attrib(str(first(unit['id']))) + '" datatype="Text">\n')
 		for key, value in sorted(_flatten(unit)):
-			if key != 'id':
+			if key != 'id' and value:
 				self.fh.write('      <prop type="' + _escape_attrib(str(key)) + '">' + _escape_cdata(str(value)) + '</prop>\n')
 		
 		for lang, translation in sorted(unit.translations.items()):
 			self.fh.write('      <tuv xml:lang="' + _escape_attrib(lang) + '">\n')
 			for key, value in sorted(_flatten(translation)):
-				self.fh.write('        <prop type="' + _escape_attrib(str(key)) + '">' + _escape_cdata(str(value)) + '</prop>\n')
+				if value:
+					self.fh.write('        <prop type="' + _escape_attrib(str(key)) + '">' + _escape_cdata(str(value)) + '</prop>\n')
 			self.fh.write('        <seg>' + _escape_cdata(str(translation.text)) + '</seg>\n'
 			              '      </tuv>\n')
 		self.fh.write('    </tu>\n')
-			
+
 
 class TabReader(Reader):
 	def __init__(self, fh: TextIO, src_lang: str, trg_lang: str, columns: Iterable[str] = ['source-document-1', 'source-document-2', 'text-1', 'text-2', 'score-aligner']):
