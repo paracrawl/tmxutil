@@ -251,7 +251,7 @@ def _flatten(unit: Mapping[str,Set[str]]) -> Iterator[Tuple[str,str]]:
 class TMXWriter(Writer):
 	def __init__(self, fh: TextIO, *, creation_date: Optional[datetime] = None):
 		self.fh = fh
-		self.creation_date = creation_date
+		self.creation_date = creation_date or datetime.now()
 		
 	def __enter__(self) -> 'TMXWriter':
 		self.fh.write('<?xml version="1.0"?>\n'
