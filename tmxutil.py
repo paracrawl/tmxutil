@@ -309,7 +309,7 @@ class TabReader(Reader):
 			if line.strip() == '':
 				continue
 
-			values = line.split('\t')
+			values = line.rstrip('\n').split('\t')
 
 			record = TranslationUnit(id={str(n)})
 
@@ -445,10 +445,10 @@ class LiveCountWriter(Writer):
 		self.key = key
 		self.top_n = 10
 
-	def __enter__(self) -> 'CountWriter':
-		self.counter = Counter()
+	def __enter__(self) -> 'LiveCountWriter':
+		self.counter = Counter() # type: Counter[Any]
 		self.total = 0
-		self.bars = []
+		self.bars: tqdm = []
 		self.n = 0
 		self.last_update = time()
 		self.last_n = 0
@@ -681,7 +681,7 @@ def deduplicate_merge(best_unit: TranslationUnit, new_unit: TranslationUnit, sor
 
 T = TypeVar('T', float, str)
 
-def build_binary_condition(type: Type[T], op: Callable[[T,T], bool]) -> Callable[[str,str], Callable[[TranslationUnit], bool]]:
+def build_binary_condition(type: Type[T], op: Callable[[T,T], bool]) -> Callable[[Callable[[TranslationUnit], Iterable[Any]],str], Callable[[TranslationUnit], bool]]:
 	"""Wrapper for standard python operations on types. I.e. to implement gt
 	and lt."""
 	def build_condition(lhs: Callable[[TranslationUnit], Iterable[Any]], rhs: str) -> Callable[[TranslationUnit], bool]:
