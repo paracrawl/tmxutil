@@ -349,22 +349,22 @@ def first(it: Iterable[A], default: Optional[B] = None) -> Optional[Union[A,B]]:
 
 
 class TabWriter(Writer):
-	def __init__(self, fh: TextIO, languages: List[str] = []):
+	fh: TextIO
+	columns: List[Callable[[TranslationUnit], Iterable[Any]]]
+
+	def __init__(self, fh: TextIO, columns: List[Callable[[TranslationUnit], Iterable[Any]]]):
 		self.fh = fh
-		self.languages = languages
+		self.columns = columns
 
 	def __enter__(self) -> 'TabWriter':
 		self.writer = csv.writer(self.fh, delimiter='\t')
 		return self
 
 	def write(self, unit: TranslationUnit) -> None:
-		if not self.languages:
-			self.languages = list(unit.translations.keys())
-
-		self.writer.writerow(
-			  [first(unit.translations[lang]['source-document'], '') for lang in self.languages]
-			+ [unit.translations[lang].text for lang in self.languages])
-
+		self.writer.writerow([
+			';'.join(map(str, getter(unit)))
+			for getter in self.columns
+		])
 
 class TxtWriter(Writer):
 	def __init__(self, fh: TextIO, language: str):
@@ -967,6 +967,7 @@ def main(argv: List[str], stdin: BufferedBinaryIO, stdout: BufferedBinaryIO) -> 
 	parser.add_argument('-l', '--input-languages', nargs=2, help='Input languages in case of tab input. Needs to be in order their appearance in the columns.')
 	parser.add_argument('-c', '--input-columns', nargs='+', help='Input columns in case of tab input. Column names ending in -1 or -2 will be treated as translation-specific.')
 	parser.add_argument('--output-languages', nargs='+', help='Output languages for tab and txt output. txt output allows only one language, tab multiple.')
+	parser.add_argument('--output-columns', metavar="PROP_EXPR", nargs='+', help='Output columns for tab output. Use {lang}.{property} syntax to select language specific properties such as en.source-document or de.text.')
 	parser.add_argument('--output', default=stdout, type=FileType('wb'), help='Output file. Defaults to stdout.')
 	parser.add_argument('--creation-date', type=fromisoformat, default=datetime.now(), help='override creation date in tmx output.')
 	parser.add_argument('-p', '--properties', action='append', help='List of A=B,C=D properties to add to each sentence pair. You can use one --properties for all files or one for each input file.')
@@ -1077,7 +1078,20 @@ def main(argv: List[str], stdin: BufferedBinaryIO, stdout: BufferedBinaryIO) -> 
 			elif args.output_format == 'tmx':
 				writer = ctx.enter_context(TMXWriter(text_out, creation_date=args.creation_date))
 			elif args.output_format == 'tab':
-				writer = ctx.enter_context(TabWriter(text_out, args.output_languages))
+				if not args.output_columns:
+					if not args.output_languages:
+						return abort("Use --output-languages X Y to select the order of the columns in the output, or use --output-columns directly.")
+					args.output_columns = [
+						*(f'{lang}.source-document' for lang in args.output_languages),
+						*(f'{lang}.text' for lang in args.output_languages)
+					]
+
+				column_getters = [
+					parse_property_getter(expr, functions=functions)
+					for expr in args.output_columns
+				]
+
+				writer = ctx.enter_context(TabWriter(text_out, column_getters))
 			elif args.output_format == 'txt':
 				if not args.output_languages or len(args.output_languages) != 1:
 					return abort("Use --output-languages X to select which language."
