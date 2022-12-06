@@ -4,7 +4,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 	long_description = fh.read()
 
 setuptools.setup(
-	name="tmxutil-pkg-jelmervdl",
+	name="tmxutil",
 	version="1.2",
 	author="Jelmer van der Linde",
 	author_email="jelmer@ikhoefgeen.nl",
