@@ -21,11 +21,10 @@ setuptools.setup(
 		"Operating System :: OS Independent",
 	],
 	entry_points={
-		'console_scripts': [
-			'tmxutil=tmxutil.cli:entrypoint',
+		"console_scripts": [
+			"tmxutil=tmxutil.cli:entrypoint",
 		],
 	},
-	package_dir={"": "src"},
-	packages=setuptools.find_packages(where="src"),
+	packages=["tmxutil"],
 	python_requires=">=3.6",
 )
