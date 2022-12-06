@@ -94,7 +94,7 @@ def parse_condition(operators: Mapping[str,Callable[[str,str], Callable[[Transla
 	return operators[match.group('op')](prop_getter, match.group('rhs'))
 
 
-def parse_property_getter(expr: str, functions: Dict[str,Callable[[Any],Any]] = {'len': len}) -> Callable[[TranslationUnit], Iterable[Any]]:
+def parse_property_getter(expr: str, functions: Mapping[str,Callable[[Any],Any]] = {'len': len}) -> Callable[[TranslationUnit], Iterable[Any]]:
 	ops = [] #type: List[Callable[[Any], Any]]
 
 	while True:

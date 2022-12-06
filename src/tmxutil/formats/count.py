@@ -1,6 +1,8 @@
 from tmxutil.types import Writer, TranslationUnit
 from tmxutil.interactive import tqdm
-from typing import Optional, Callable, TextIO, List, Any, Type
+from collections import Counter
+from time import time
+from typing import Optional, Callable, TextIO, Iterable, Any, Type
 from types import TracebackType
 from operator import itemgetter
 
@@ -9,7 +11,7 @@ class CountWriter(Writer):
 	"""Instead of writing tmx records, it counts a property and writes a summary
 	of which values it encountered for that property, and how often it encountered
 	them."""
-	def __init__(self, fh: TextIO, key: Callable[[TranslationUnit], List[Any]]):
+	def __init__(self, fh: TextIO, key: Callable[[TranslationUnit], Iterable[Any]]):
 		self.fh = fh
 		self.key = key
 
@@ -28,7 +30,7 @@ class CountWriter(Writer):
 
 class LiveCountWriter(Writer):
 	"""Live variant of CountWriter: shows live updating bars while counting."""
-	def __init__(self, fh: TextIO, key: Callable[[TranslationUnit], List[Any]]):
+	def __init__(self, fh: TextIO, key: Callable[[TranslationUnit], Iterable[Any]]):
 		self.fh = fh
 		self.key = key
 		self.top_n = 10
